@@ -1,0 +1,235 @@
+import streamlit as st
+import google.generativeai as genai
+import os
+from dotenv import load_dotenv
+from utils import get_index_context
+
+# Load environment variables
+load_dotenv()
+
+# Configure Gemini API
+api_key = os.getenv("GOOGLE_API_KEY")
+if not api_key:
+    st.error("Google API Key not found. Please set it in .env file.")
+    st.stop()
+
+genai.configure(api_key=api_key)
+
+# Generation Config
+generation_config = {
+  "temperature": 0.0, # Low temperature for strict rule following
+  "top_p": 0.95,
+  "top_k": 40,
+  "max_output_tokens": 8192,
+}
+
+# System Prompt (User's Instruction)
+SYSTEM_PROMPT = """
+## QC 분석기기 문서 위치 안내 봇 지침 (초단축/고장 방지/인덱스만)
+
+1. 언어
+* 입력에 한글이 1글자라도 있으면 출력 전체 한국어, 아니면 출력 전체 영어.
+* Title, Sheet No는 원문 그대로(번역 금지).
+
+2. 역할
+* 업로드된 인덱스 요약 PDF만 근거로, 관련 문서의 Sheet No / Title / Instrument만 안내한다.
+* 해결 방법, 원인, 절차, 일반 조언은 절대 출력하지 않는다.
+* 허용되는 추가 문장은 분류 근거 1줄뿐이다.
+
+3. 내부 추출(출력 금지, 필수)
+* 장비: 메시지에서 hplc/uplc/gc/icp 중 포함된 것을 대소문자 무시로 1개 선택.
+* 증상: 아래 규칙으로 Troubleshooting Category 1개를 반드시 선택 시도한다.
+  Peak shape: 피크, peak, 모양, 형태, 형상, shape, tailing, fronting, splitting, broadening
+  RT/Reproducibility: RT, shift, 밀림, 변화, 재현성, 반복성, reproducibility
+  Baseline/Noise: baseline, 베이스라인, noise, 노이즈, drift
+  Pressure/Flow: pressure, 압력, flow, 유량, fluctuation, 변동
+  Carryover: carryover, 캐리오버, 잔류
+  Leak: leak, 누설, 새는
+  Autosampler: autosampler, 오토샘플러, 샘플러
+  Sensitivity: sensitivity, 감도, 신호 약함
+  Software/Connectivity: software, connectivity, 소프트웨어, 연결, 통신, 로그인
+  Detector: detector, 디텍터, 검출기
+* UV/RID/ELSD 등은 모듈로만 저장하고, 증상 키워드로 단독 사용 금지.
+
+4. 매칭(예외 방지 핵심, 강제)
+* 문서 매칭 0건을 선언하기 전에 반드시 아래 검색을 순서대로 수행한다. (총 3회 검색 강제)
+  검색1: 사용자 증상 표현 그대로(예: 피크 모양, peak shape 등)
+  검색2: 선택된 Category 이름 자체(예: Peak shape, RT/Reproducibility 등)
+  검색3: Category 대표 확장어
+  Peak shape면 tailing OR fronting OR splitting OR broadening OR peak
+  RT/Reproducibility면 RT OR shift OR reproducibility
+  Baseline/Noise면 baseline OR noise OR drift
+  Pressure/Flow면 pressure OR flow OR fluctuation
+  Carryover면 carryover
+  Leak면 leak
+  Autosampler면 autosampler
+  Sensitivity면 sensitivity
+  Software/Connectivity면 connectivity OR software
+  Detector면 detector
+* 위 3회 검색 중 1회라도 인덱스에서 관련 항목이 나오면 예외를 절대 출력하지 말고 문서를 제시한다.
+
+5. 시트번호 인식/정규화(강제)
+* 인덱스에서 아래 형식들을 모두 시트번호로 인식한다.
+  HPLC-숫자, HPLC_숫자, HPLC숫자, HPLC 공백 숫자 (숫자 1~3자리 허용)
+* 출력은 반드시 HPLC-###로 패딩하여 표기한다.
+  예: HPLC-29, HPLC_29, HPLC029, HPLC 29 -> HPLC-029
+* 출력에 HPLC-###가 1개도 없으면 그때만 예외 처리 가능.
+
+6. 랭킹(최대 3개)
+* 1순위: Title/키워드/트리거에 증상 단어 또는 확장어가 포함된 항목
+* 2~3순위: 동일 Category로 분류되는 항목
+* 최대 3개만 출력. 없으면 해당 줄 자체를 출력하지 않는다.
+
+7. 출력(템플릿 고정, 추가 텍스트 금지, 줄바꿈 필수)
+
+0) 분류 근거(1줄)
+   질문 키워드 __에 따라 Category로 분류되었습니다.
+
+분류
+Doc Type: Troubleshooting
+Category:
+
+확인할 문서 (각 순위마다 반드시 줄바꿈 할 것)
+1순위: Sheet No / Title / Instrument
+<줄바꿈>
+2순위: (있을 때만)
+<줄바꿈>
+3순위: (있을 때만)
+
+열람 방법(고정)
+보안 링크에 접속한 후 해당 장비 폴더(HPLC/UPLC/GC/ICP)에서 해당 번호의 PDF를 열람하시면 됩니다.
+
+8. 예외(진짜 0건일 때만)
+* 아래 조건을 모두 만족할 때만 예외 2줄을 출력한다.
+  (1) 4)의 검색 3회를 모두 수행했는데도 인덱스 결과가 0건
+  또는 (2) 결과는 있었지만 5) 규칙으로 HPLC-###를 1개도 만들 수 없음
+* 예외 출력(아래 2줄만)
+  문서 근거 부족으로 안내 불가
+  질문 1~2개만 요청: 장비 종류 또는 증상 키워드 또는 에러코드
+"""
+
+# Streamlit UI
+st.set_page_config(page_title="장비 트러블슈팅 가이드", page_icon="🔧", layout="centered")
+
+# Custom CSS for Premium Design
+st.markdown("""
+<style>
+    /* Global Font */
+    @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@300;400;600&display=swap');
+    
+    html, body, [class*="css"] {
+        font-family: 'Pretendard', sans-serif;
+    }
+
+    /* Main Container */
+    .stApp {
+        background-color: #f8f9fa;
+    }
+
+    /* Header Styling */
+    h1 {
+        color: #1e1e1e;
+        font-weight: 700;
+        letter-spacing: -1px;
+    }
+    
+    /* Subheader */
+    .stMarkdown p {
+        color: #495057;
+        font-size: 1.1rem;
+    }
+
+    /* Chat Message Styling */
+    .stChatMessage {
+        background-color: transparent !important;
+        border: none !important;
+    }
+    
+    [data-testid="stChatMessageContent"] {
+        background-color: #ffffff;
+        border-radius: 15px;
+        padding: 1.5rem;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        color: #212529;
+        font-size: 1rem;
+        line-height: 1.6;
+    }
+
+    /* User Message Specific */
+    div[data-testid="stChatMessage"]:nth-child(odd) [data-testid="stChatMessageContent"] {
+        background-color: #e9ecef; /* Different color for user if needed, usually inverted in logic */
+    }
+
+    /* Assistant Message Enhancement */
+    /* Markdown Headers in Chat */
+    .stChatMessage h1, .stChatMessage h2, .stChatMessage h3 {
+        color: #0d6efd;
+        margin-top: 0;
+    }
+    
+    /* Strong/Bold text */
+    strong {
+        color: #0d6efd;
+        font-weight: 600;
+    }
+
+    /* Input Box Styling */
+    .stChatInputContainer {
+        border-radius: 20px !important;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+st.title("🔧 분석기기 트러블슈팅 가이드")
+st.markdown("증상이나 문제를 입력하면 관련된 문서를 안내해드립니다.")
+
+# Initialize Chat History
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+# Initialize Context (Load PDF only once)
+if "index_context" not in st.session_state:
+    with st.spinner("문서 인덱스를 불러오는 중입니다..."):
+        st.session_state.index_context = get_index_context()
+
+# Display Chat History
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
+# Chat Input
+if prompt := st.chat_input("증상을 입력해주세요 (예: HPLC 피크 모양이 이상해)"):
+    # Display user message
+    with st.chat_message("user"):
+        st.markdown(prompt)
+    st.session_state.messages.append({"role": "user", "content": prompt})
+
+    # Generate Response
+    with st.chat_message("assistant"):
+        message_placeholder = st.empty()
+        
+        try:
+            # Construct the full prompt with context
+            full_prompt = [
+                SYSTEM_PROMPT,
+                f"\n\n--- INDEX DATA START ---\n{st.session_state.index_context}\n--- INDEX DATA END ---\n",
+                f"User Question: {prompt}"
+            ]
+            
+            model = genai.GenerativeModel("gemini-2.5-flash") # Upgraded to 2.5-flash (Newest working model)
+            response = model.generate_content(full_prompt, generation_config=generation_config)
+            
+            full_response = response.text
+            
+            # Post-processing to enforce newlines if the model misses them
+            full_response = full_response.replace("1순위:", "\n1순위:").replace("2순위:", "\n\n2순위:").replace("3순위:", "\n\n3순위:")
+            
+            message_placeholder.markdown(full_response)
+            
+            st.session_state.messages.append({"role": "assistant", "content": full_response})
+            
+        except Exception as e:
+            error_message = f"오류가 발생했습니다: {str(e)}"
+            message_placeholder.error(error_message)
+            st.session_state.messages.append({"role": "assistant", "content": error_message})
+

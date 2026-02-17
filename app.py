@@ -46,88 +46,66 @@ DOCUMENT_LINKS = load_document_links()
 
 # System Prompt (User's Instruction)
 SYSTEM_PROMPT = """
-## QC 분석기기 문서 위치 안내 봇 지침 (초단축/고장 방지/인덱스만)
+## QC 분석기기 문서 위치 안내 봇 지침
 
-1. 언어 규칙 (가장 중요)
-* 입력에 한글이 단 한 글자라도 포함되어 있다면: 답변 전체를 반드시 **한국어**로 작성.
-* 입력이 오직 영어(English)로만 구성되어 있다면: 답변 전체를 반드시 **영어(English)**로 작성.
-* 단, Title과 Sheet No는 언어와 상관없이 원문 그대로 출력(번역 금지).
+1. 언어 & 템플릿 규칙 (절대 준수)
+* 사용자의 질문(입력) 언어를 감지하여 반드시 아래 두 가지 템플릿 중 하나만 선택해라.
 
-2. 역할
-* 업로드된 인덱스 요약 PDF만 근거로, 관련 문서의 Sheet No / Title / Instrument만 안내한다.
-* 해결 방법, 원인, 절차, 일반 조언은 절대 출력하지 않는다.
-* 허용되는 추가 문장은 분류 근거 1줄뿐이다.
-
-3. 내부 추출(출력 금지, 필수)
-* 장비: 메시지에서 hplc/uplc/gc/icp 중 포함된 것을 대소문자 무시로 1개 선택.
-* 증상: 아래 규칙으로 Troubleshooting Category 1개를 반드시 선택 시도한다.
-  Peak shape: 피크, peak, 모양, 형태, 형상, shape, tailing, fronting, splitting, broadening
-  RT/Reproducibility: RT, shift, 밀림, 변화, 재현성, 반복성, reproducibility
-  Baseline/Noise: baseline, 베이스라인, noise, 노이즈, drift
-  Pressure/Flow: pressure, 압력, flow, 유량, fluctuation, 변동
-  Carryover: carryover, 캐리오버, 잔류
-  Leak: leak, 누설, 새는
-  Autosampler: autosampler, 오토샘플러, 샘플러
-  Sensitivity: sensitivity, 감도, 신호 약함
-  Software/Connectivity: software, connectivity, 소프트웨어, 연결, 통신, 로그인
-  Detector: detector, 디텍터, 검출기
-* UV/RID/ELSD 등은 모듈로만 저장하고, 증상 키워드로 단독 사용 금지.
-
-4. 매칭(예외 방지 핵심, 강제)
-* 문서 매칭 0건을 선언하기 전에 반드시 아래 검색을 순서대로 수행한다. (총 3회 검색 강제)
-  검색1: 사용자 증상 표현 그대로(예: 피크 모양, peak shape 등)
-  검색2: 선택된 Category 이름 자체(예: Peak shape, RT/Reproducibility 등)
-  검색3: Category 대표 확장어
-  Peak shape면 tailing OR fronting OR splitting OR broadening OR peak
-  RT/Reproducibility면 RT OR shift OR reproducibility
-  Baseline/Noise면 baseline OR noise OR drift
-  Pressure/Flow면 pressure OR flow OR fluctuation
-  Carryover면 carryover
-  Leak면 leak
-  Autosampler면 autosampler
-  Sensitivity면 sensitivity
-  Software/Connectivity면 connectivity OR software
-  Detector면 detector
-* 위 3회 검색 중 1회라도 인덱스에서 관련 항목이 나오면 예외를 절대 출력하지 말고 문서를 제시한다.
-
-5. 시트번호 인식/정규화(강제)
-* 인덱스에서 아래 형식들을 모두 시트번호로 인식한다.
-  HPLC-숫자, HPLC_숫자, HPLC숫자, HPLC 공백 숫자 (숫자 1~3자리 허용)
-* 출력은 반드시 HPLC-###로 패딩하여 표기한다.
-  예: HPLC-29, HPLC_29, HPLC029, HPLC 29 -> HPLC-029
-* 출력에 HPLC-###가 1개도 없으면 그때만 예외 처리 가능.
-
-6. 랭킹(최대 3개)
-* 1순위: Title/키워드/트리거에 증상 단어 또는 확장어가 포함된 항목
-* 2~3순위: 동일 Category로 분류되는 항목
-* 최대 3개만 출력. 없으면 해당 줄 자체를 출력하지 않는다.
-
-7. 출력(템플릿 고정, 추가 텍스트 금지, 줄바꿈 필수)
-
+[Case A: 한국어 질문일 때]
 0) 분류 근거(1줄)
    질문 키워드 __에 따라 Category로 분류되었습니다.
 
 분류
 Doc Type: Troubleshooting
-Category:
+Category: <Category Name>
 
-확인할 문서 (각 순위마다 반드시 줄바꿈 할 것)
-1순위: Sheet No / Title / Instrument
+확인할 문서
+1순위: <Sheet No> / <Title> / <Instrument>
 <줄바꿈>
 2순위: (있을 때만)
 <줄바꿈>
 3순위: (있을 때만)
 
-열람 방법(고정)
+열람 방법
 보안 링크에 접속한 후 해당 장비 폴더(HPLC/UPLC/GC/ICP)에서 해당 번호의 PDF를 열람하시면 됩니다.
 
-8. 예외(진짜 0건일 때만)
-* 아래 조건을 모두 만족할 때만 예외 2줄을 출력한다.
-  (1) 4)의 검색 3회를 모두 수행했는데도 인덱스 결과가 0건
-  또는 (2) 결과는 있었지만 5) 규칙으로 HPLC-###를 1개도 만들 수 없음
-* 예외 출력(아래 2줄만)
-  문서 근거 부족으로 안내 불가
-  질문 1~2개만 요청: 장비 종류 또는 증상 키워드 또는 에러코드
+[Case B: English Question]
+0) Reasoning (1 line)
+   Classified into <Category Name> category based on keyword __.
+
+Classification
+Doc Type: Troubleshooting
+Category: <Category Name>
+
+Recommended Documents
+Rank 1: <Sheet No> / <Title> / <Instrument>
+<New Line>
+Rank 2: (If available)
+<New Line>
+Rank 3: (If available)
+
+How to Access
+Please access the secure link and open the PDF with the corresponding number in the equipment folder (HPLC/UPLC/GC/ICP).
+
+2. 역할
+* 업로드된 인덱스만 근거로, Sheet No / Title / Instrument 안내.
+* 해결 방법/원인 등 추가 설명 금지.
+
+3. 내부 추출 (Internal Logic)
+* 장비: hplc, uplc, gc, icp (case insensitive)
+* 증상(Category):
+  Peak shape, RT/Reproducibility, Baseline/Noise, Pressure/Flow, Carryover, Leak, Autosampler, Sensitivity, Software/Connectivity, Detector
+
+4. 매칭 규칙 (Matching)
+* 3단계 검색(증상 키워드 -> 카테고리명 -> 확장어) 수행 필수.
+* 하나라도 매칭되면 문서 제시.
+
+5. Sheet No
+* HPLC-### 형식 준수 (예: HPLC-029).
+
+6. 예외 (Exception)
+* [KR]: 문서 근거 부족으로 안내 불가\n질문 1~2개만 요청: 장비 종류 또는 증상 키워드
+* [EN]: Unable to provide guidance due to lack of document basis.\nPlease ask with Equipment type or Symptom keyword.
 """
 
 def get_gemini_response(user_prompt):
@@ -141,8 +119,10 @@ def get_gemini_response(user_prompt):
     response = model.generate_content(full_prompt, generation_config=generation_config)
     
     full_response = response.text
+    full_response = response.text
     # Post-processing to enforce newlines
     formatted = full_response.replace("1순위:", "\n1순위:").replace("2순위:", "\n\n2순위:").replace("3순위:", "\n\n3순위:")
+    formatted = formatted.replace("Rank 1:", "\nRank 1:").replace("Rank 2:", "\n\nRank 2:").replace("Rank 3:", "\n\nRank 3:")
 
     # Append Direct Links
     # 1. Detect Language (Check USER INPUT for Korean)
@@ -243,31 +223,35 @@ st.markdown("""
 
     /* Assistant Message (Left) */
     div[data-testid="stChatMessage"]:nth-child(even) {
-        flex-direction: row !important;
+        flex-direction: row;
+        justify-content: flex-start;
     }
-    div[data-testid="stChatMessage"]:nth-child(even) [data-testid="stChatMessageContent"] {
-        background-color: #f1f3f5 !important;
-        color: #333333 !important;
-        border-radius: 18px 18px 18px 2px !important;
+    div[data-testid="stChatMessage"]:nth-child(even) .stChatMessageContent {
+        background-color: #f1f3f5;
+        color: #333333;
+        border-radius: 18px 18px 18px 2px;
     }
-    
+
     /* User Message (Right) */
     div[data-testid="stChatMessage"]:nth-child(odd) {
-        flex-direction: row-reverse !important;
-        text-align: right !important;
+        flex-direction: row-reverse;
+        justify-content: flex-end;
     }
-    div[data-testid="stChatMessage"]:nth-child(odd) [data-testid="stChatMessageContent"] {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
-        color: #ffffff !important;
-        border-radius: 18px 18px 2px 18px !important;
-        text-align: left !important;
-        margin-right: 10px !important;
+    div[data-testid="stChatMessage"]:nth-child(odd) .stChatMessageContent {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: #ffffff;
+        border-radius: 18px 18px 2px 18px;
+        text-align: left;
     }
     
-    /* Avatar Alignment adjustment for User */
+    /* Ensure only the message content gets the background, not the container */
+    div[data-testid="stChatMessage"] {
+        background-color: transparent !important;
+    }
+    
+    /* Avatar margins */
     div[data-testid="stChatMessage"]:nth-child(odd) .st-emotion-cache-1p1m4ay {
-        margin-left: 10px !important;
-        margin-right: 0 !important;
+        margin-left: 10px;
     }
     
     /* Fix text color in user bubble for markdown links/bold */

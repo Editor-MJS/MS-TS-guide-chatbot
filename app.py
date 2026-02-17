@@ -239,22 +239,33 @@ st.markdown("""
         max-width: 85%;
     }
 
-    /* Assistant Bubble (Left, Gray/White) */
+    /* Assistant Message (Left) */
+    div[data-testid="stChatMessage"]:nth-child(even) {
+        flex-direction: row;
+    }
     div[data-testid="stChatMessage"]:nth-child(even) [data-testid="stChatMessageContent"] {
-        background-color: #f1f3f5;
+        background-color: #f1f3f5; /* Light Gray */
         color: #333333;
-        border-top-left-radius: 2px;
+        border-radius: 18px 18px 18px 2px;
     }
 
-    /* User Bubble (Right, Gradient/Blue) */
+    /* User Message (Right) */
     div[data-testid="stChatMessage"]:nth-child(odd) {
         flex-direction: row-reverse;
+        text-align: right;
     }
     div[data-testid="stChatMessage"]:nth-child(odd) [data-testid="stChatMessageContent"] {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); /* Purple-ish Blue */
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); /* Purple-Blue Gradient */
         color: #ffffff;
-        border-top-right-radius: 2px;
-        text-align: left; /* Keep text aligned left inside bubble */
+        border-radius: 18px 18px 2px 18px;
+        text-align: left; /* Text inside bubble stays left-aligned */
+        margin-right: 10px;
+    }
+    
+    /* Avatar Alignment adjustment for User */
+    div[data-testid="stChatMessage"]:nth-child(odd) .st-emotion-cache-1p1m4ay {
+        margin-left: 10px;
+        margin-right: 0;
     }
     
     /* Fix text color in user bubble for markdown links/bold */

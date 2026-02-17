@@ -145,9 +145,11 @@ def get_gemini_response(user_prompt):
     formatted = full_response.replace("1순위:", "\n1순위:").replace("2순위:", "\n\n2순위:").replace("3순위:", "\n\n3순위:")
 
     # Append Direct Links
-    # 1. Detect Language (Simple check for Korean characters)
+    # 1. Detect Language (Check USER INPUT for Korean)
+    # If user input has ANY Korean -> Show KR links.
+    # If user input is ONLY English -> Show EN links.
     lang = "EN"
-    if any(0xAC00 <= ord(c) <= 0xD7A3 for c in formatted): # Hangul syllables
+    if any(0xAC00 <= ord(c) <= 0xD7A3 for c in user_prompt): # Hangul syllables in INPUT
         lang = "KR"
     
     # 2. Extract Document IDs (e.g., HPLC-029)
@@ -241,31 +243,31 @@ st.markdown("""
 
     /* Assistant Message (Left) */
     div[data-testid="stChatMessage"]:nth-child(even) {
-        flex-direction: row;
+        flex-direction: row !important;
     }
     div[data-testid="stChatMessage"]:nth-child(even) [data-testid="stChatMessageContent"] {
-        background-color: #f1f3f5; /* Light Gray */
-        color: #333333;
-        border-radius: 18px 18px 18px 2px;
+        background-color: #f1f3f5 !important;
+        color: #333333 !important;
+        border-radius: 18px 18px 18px 2px !important;
     }
-
+    
     /* User Message (Right) */
     div[data-testid="stChatMessage"]:nth-child(odd) {
-        flex-direction: row-reverse;
-        text-align: right;
+        flex-direction: row-reverse !important;
+        text-align: right !important;
     }
     div[data-testid="stChatMessage"]:nth-child(odd) [data-testid="stChatMessageContent"] {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); /* Purple-Blue Gradient */
-        color: #ffffff;
-        border-radius: 18px 18px 2px 18px;
-        text-align: left; /* Text inside bubble stays left-aligned */
-        margin-right: 10px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+        color: #ffffff !important;
+        border-radius: 18px 18px 2px 18px !important;
+        text-align: left !important;
+        margin-right: 10px !important;
     }
     
     /* Avatar Alignment adjustment for User */
     div[data-testid="stChatMessage"]:nth-child(odd) .st-emotion-cache-1p1m4ay {
-        margin-left: 10px;
-        margin-right: 0;
+        margin-left: 10px !important;
+        margin-right: 0 !important;
     }
     
     /* Fix text color in user bubble for markdown links/bold */

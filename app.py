@@ -1,6 +1,8 @@
 import streamlit as st
 import google.generativeai as genai
 import os
+import csv
+import re
 from dotenv import load_dotenv
 from utils import get_index_context
 
@@ -21,7 +23,26 @@ generation_config = {
   "top_p": 0.95,
   "top_k": 40,
   "max_output_tokens": 8192,
+  "max_output_tokens": 8192,
 }
+
+# Load Document Links
+def load_document_links():
+    links = {}
+    try:
+        with open('document_links.csv', mode='r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                # Key: (EQUIPMENT, SHEET_NO, LANGUAGE)
+                # Ensure sheet_no is 3 digits if needed, but CSV already has 030
+                key = (row['equipment'].upper(), row['sheet_no'], row['language'].upper())
+                if row['link'] and row['link'].strip():
+                    links[key] = row['link'].strip()
+    except Exception:
+        return {} # Fail silently if file missing
+    return links
+
+DOCUMENT_LINKS = load_document_links()
 
 # System Prompt (User's Instruction)
 SYSTEM_PROMPT = """
@@ -120,8 +141,34 @@ def get_gemini_response(user_prompt):
     response = model.generate_content(full_prompt, generation_config=generation_config)
     
     full_response = response.text
-    # Post-processing
-    return full_response.replace("1순위:", "\n1순위:").replace("2순위:", "\n\n2순위:").replace("3순위:", "\n\n3순위:")
+    # Post-processing to enforce newlines
+    formatted = full_response.replace("1순위:", "\n1순위:").replace("2순위:", "\n\n2순위:").replace("3순위:", "\n\n3순위:")
+
+    # Append Direct Links
+    # 1. Detect Language (Simple check for Korean characters)
+    lang = "EN"
+    if any(0xAC00 <= ord(c) <= 0xD7A3 for c in formatted): # Hangul syllables
+        lang = "KR"
+    
+    # 2. Extract Document IDs (e.g., HPLC-029)
+    # Pattern matches HPLC-029, UPLC-001, etc.
+    matches = re.findall(r'(HPLC|UPLC|GC|ICP)-(\d{3})', formatted, re.IGNORECASE)
+    
+    unique_links = set()
+    link_markdown = ""
+    
+    for inst, num in matches:
+        key = (inst.upper(), num, lang)
+        if key in DOCUMENT_LINKS:
+            url = DOCUMENT_LINKS[key]
+            if url not in unique_links:
+                if lang == "KR":
+                    link_markdown += f"\n\n🔗 [{inst}-{num} 문서 바로가기]({url})"
+                else:
+                    link_markdown += f"\n\n🔗 [Open {inst}-{num}]({url})"
+                unique_links.add(url)
+    
+    return formatted + link_markdown
 
 # Streamlit UI
 st.set_page_config(page_title="MS·TS guide chatbot", page_icon="🐻", layout="centered")

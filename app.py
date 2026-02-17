@@ -109,6 +109,20 @@ Category:
   질문 1~2개만 요청: 장비 종류 또는 증상 키워드 또는 에러코드
 """
 
+def get_gemini_response(user_prompt):
+    full_prompt = [
+        SYSTEM_PROMPT,
+        f"\n\n--- INDEX DATA START ---\n{st.session_state.index_context}\n--- INDEX DATA END ---\n",
+        f"User Question: {user_prompt}"
+    ]
+    
+    model = genai.GenerativeModel("gemini-2.5-flash") # Upgraded to 2.5-flash
+    response = model.generate_content(full_prompt, generation_config=generation_config)
+    
+    full_response = response.text
+    # Post-processing
+    return full_response.replace("1순위:", "\n1순위:").replace("2순위:", "\n\n2순위:").replace("3순위:", "\n\n3순위:")
+
 # Streamlit UI
 st.set_page_config(page_title="MS·TS guide chatbot", page_icon="🐻", layout="centered")
 
@@ -250,14 +264,24 @@ for message in st.session_state.messages:
 if len(st.session_state.messages) == 0:
     st.markdown("<div class='starter-header'>💡 예시 질문을 클릭해보세요</div>", unsafe_allow_html=True)
     col1, col2 = st.columns(2)
+    
+    # Helper to handle button click
+    def handle_starter_click(text):
+        st.session_state.messages.append({"role": "user", "content": text})
+        with st.spinner("답변을 생성하는 중입니다..."):
+            try:
+                response = get_gemini_response(text)
+                st.session_state.messages.append({"role": "assistant", "content": response})
+            except Exception as e:
+                st.session_state.messages.append({"role": "assistant", "content": f"오류 발생: {str(e)}"})
+        st.rerun()
+
     with col1:
         if st.button("HPLC 피크 갈라짐 해결방법 알려줘", use_container_width=True):
-            st.session_state.messages.append({"role": "user", "content": "HPLC 피크 갈라짐 해결방법 알려줘"})
-            st.rerun()
+            handle_starter_click("HPLC 피크 갈라짐 해결방법 알려줘")
     with col2:
         if st.button("GC 바탕선이 흔들려", use_container_width=True):
-            st.session_state.messages.append({"role": "user", "content": "GC 바탕선이 흔들려"})
-            st.rerun()
+            handle_starter_click("GC 바탕선이 흔들려")
 
 # Chat Input
 if prompt := st.chat_input("증상을 입력해주세요 (예: HPLC 피크 모양이 이상해)"):
@@ -271,23 +295,8 @@ if prompt := st.chat_input("증상을 입력해주세요 (예: HPLC 피크 모�
         message_placeholder = st.empty()
         
         try:
-            # Construct the full prompt with context
-            full_prompt = [
-                SYSTEM_PROMPT,
-                f"\n\n--- INDEX DATA START ---\n{st.session_state.index_context}\n--- INDEX DATA END ---\n",
-                f"User Question: {prompt}"
-            ]
-            
-            model = genai.GenerativeModel("gemini-2.5-flash") # Upgraded to 2.5-flash
-            response = model.generate_content(full_prompt, generation_config=generation_config)
-            
-            full_response = response.text
-            
-            # Post-processing to enforce newlines if the model misses them
-            full_response = full_response.replace("1순위:", "\n1순위:").replace("2순위:", "\n\n2순위:").replace("3순위:", "\n\n3순위:")
-            
+            full_response = get_gemini_response(prompt)
             message_placeholder.markdown(full_response)
-            
             st.session_state.messages.append({"role": "assistant", "content": full_response})
             
         except Exception as e:

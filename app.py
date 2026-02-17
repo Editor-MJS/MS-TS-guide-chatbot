@@ -19,7 +19,7 @@ genai.configure(api_key=api_key)
 
 # Generation Config
 generation_config = {
-  "temperature": 0.0, # Low temperature for strict rule following
+  "temperature": 0.1, # Slightly increased for better flexibility
   "top_p": 0.95,
   "top_k": 40,
   "max_output_tokens": 8192,
@@ -120,19 +120,25 @@ Category:
 열람 방법(고정)
 보안 링크에 접속한 후 해당 장비 폴더(HPLC/UPLC/GC/ICP)에서 해당 번호의 PDF를 열람하시면 됩니다.
 
-8. 예외(진짜 0건일 때만)
-* 아래 조건을 모두 만족할 때만 예외 2줄을 출력한다.
-  (1) 4)의 검색 3회를 모두 수행했는데도 인덱스 결과가 0건
-  또는 (2) 결과는 있었지만 5) 규칙으로 HPLC-###를 1개도 만들 수 없음
-* 예외 출력(아래 2줄만)
-  문서 근거 부족으로 안내 불가
-  질문 1~2개만 요청: 장비 종류 또는 증상 키워드 또는 에러코드
+8. 대화 맥락 유지 (Context Awareness)
+* 사용자가 "더 알려줘", "다른 방법 없어?", "비슷한 거 찾아줘" 등 추가 정보를 요청하면, **이전 대화의 장비/증상 정보**를 그대로 유지하여 문서를 다시 검색한다.
+* 이때는 키워드가 없어도 예외 처리하지 않고, 이전 카테고리의 **2~3순위** 또는 **유사 카테고리** 문서를 찾아 답변한다.
 """
 
 def get_gemini_response(user_prompt):
+    # Context Construction
+    conversation_history = ""
+    # Retrieve last 2 turns (User + Assistant) for context if available
+    if "messages" in st.session_state and len(st.session_state.messages) > 0:
+        recent_msgs = st.session_state.messages[-4:] # Get last 2 interactions
+        for msg in recent_msgs:
+            role = "User" if msg["role"] == "user" else "Assistant"
+            conversation_history += f"{role}: {msg['content']}\n"
+
     full_prompt = [
         SYSTEM_PROMPT,
         f"\n\n--- INDEX DATA START ---\n{st.session_state.index_context}\n--- INDEX DATA END ---\n",
+        f"\n--- CONVERSATION HISTORY START ---\n{conversation_history}\n--- CONVERSATION HISTORY END ---\n",
         f"User Question: {user_prompt}"
     ]
     

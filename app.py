@@ -110,79 +110,121 @@ Category:
 """
 
 # Streamlit UI
-st.set_page_config(page_title="장비 트러블슈팅 가이드", page_icon="🔧", layout="centered")
+st.set_page_config(page_title="MS·TS guide chatbot", page_icon="🐻", layout="centered")
 
-# Custom CSS for Premium Design
+# Custom CSS for Premium Design & Gradient Header
 st.markdown("""
 <style>
-    /* Global Font */
-    @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@300;400;600&display=swap');
+    /* Global Font & Reset */
+    @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@300;400;600;700&display=swap');
     
     html, body, [class*="css"] {
         font-family: 'Pretendard', sans-serif;
+        color: #333333;
     }
 
-    /* Main Container */
+    /* Main Background */
     .stApp {
-        background-color: #f8f9fa;
+        background-color: #ffffff;
     }
 
-    /* Header Styling */
-    h1 {
-        color: #1e1e1e;
-        font-weight: 700;
-        letter-spacing: -1px;
+    /* Hide default Streamlit Header */
+    header {visibility: hidden;}
+
+    /* Premium Gradient Header Container */
+    .header-container {
+        background: linear-gradient(135deg, #2b5876 0%, #4e4376 100%);  /* Deep Blue/Purple Gradient */
+        /* Alternative brighter gradient matching image: */
+        background: linear-gradient(135deg, #3B28CC 0%, #E062E6 100%);
+        padding: 3rem 2rem;
+        border-radius: 0 0 25px 25px;
+        color: white;
+        margin-bottom: 2rem;
+        text-align: left;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.1);
     }
     
-    /* Subheader */
-    .stMarkdown p {
-        color: #495057;
-        font-size: 1.1rem;
+    .header-title {
+        font-size: 2.2rem;
+        font-weight: 700;
+        margin-bottom: 0.5rem;
+    }
+    
+    .header-subtitle {
+        font-size: 1rem;
+        opacity: 0.9;
+        font-weight: 300;
     }
 
     /* Chat Message Styling */
-    .stChatMessage {
-        background-color: transparent !important;
-        border: none !important;
+    [data-testid="stChatMessage"] {
+        background-color: transparent;
+        padding: 1rem 0;
     }
     
+    /* Avatar Styling */
+    [data-testid="stChatMessage"] .st-emotion-cache-1p1m4ay {
+        border-radius: 50%;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    /* Message Bubbles */
     [data-testid="stChatMessageContent"] {
-        background-color: #ffffff;
-        border-radius: 15px;
-        padding: 1.5rem;
-        box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-        color: #212529;
-        font-size: 1rem;
-        line-height: 1.6;
+        padding: 1rem 1.2rem;
+        border-radius: 18px;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+        font-size: 0.95rem;
+        line-height: 1.5;
+        max-width: 85%;
     }
 
-    /* User Message Specific */
+    /* Assistant Bubble (Left, Gray/White) */
+    div[data-testid="stChatMessage"]:nth-child(even) [data-testid="stChatMessageContent"] {
+        background-color: #f1f3f5;
+        color: #333333;
+        border-top-left-radius: 2px;
+    }
+
+    /* User Bubble (Right, Gradient/Blue) */
+    div[data-testid="stChatMessage"]:nth-child(odd) {
+        flex-direction: row-reverse;
+    }
     div[data-testid="stChatMessage"]:nth-child(odd) [data-testid="stChatMessageContent"] {
-        background-color: #e9ecef; /* Different color for user if needed, usually inverted in logic */
-    }
-
-    /* Assistant Message Enhancement */
-    /* Markdown Headers in Chat */
-    .stChatMessage h1, .stChatMessage h2, .stChatMessage h3 {
-        color: #0d6efd;
-        margin-top: 0;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); /* Purple-ish Blue */
+        color: #ffffff;
+        border-top-right-radius: 2px;
+        text-align: left; /* Keep text aligned left inside bubble */
     }
     
-    /* Strong/Bold text */
-    strong {
-        color: #0d6efd;
-        font-weight: 600;
+    /* Fix text color in user bubble for markdown links/bold */
+    div[data-testid="stChatMessage"]:nth-child(odd) [data-testid="stChatMessageContent"] p,
+    div[data-testid="stChatMessage"]:nth-child(odd) [data-testid="stChatMessageContent"] strong {
+        color: #ffffff !important;
     }
 
-    /* Input Box Styling */
+    /* Conversation Starters */
+    .starter-header {
+        font-size: 0.9rem;
+        color: #888;
+        margin-bottom: 10px;
+        margin-top: 20px;
+    }
+    
+    /* Input Area Styling */
     .stChatInputContainer {
-        border-radius: 20px !important;
+        padding-bottom: 1rem;
     }
 </style>
 """, unsafe_allow_html=True)
 
-st.title("🔧 분석기기 트러블슈팅 가이드")
-st.markdown("증상이나 문제를 입력하면 관련된 문서를 안내해드립니다.")
+# Custom Header Display
+st.markdown("""
+<div class="header-container">
+    <div class="header-title">MS·TS guide chatbot</div>
+    <div class="header-subtitle">증상이나 문제를 입력하면 관련된 문서를 안내해드립니다.</div>
+</div>
+""", unsafe_allow_html=True)
+
 
 # Initialize Chat History
 if "messages" not in st.session_state:
@@ -195,18 +237,37 @@ if "index_context" not in st.session_state:
 
 # Display Chat History
 for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
+    # Set avatars: Orange Bear for assistant, default for user
+    if message["role"] == "assistant":
+        avatar = "🐻" 
+    else:
+        avatar = "🧑‍💻"
+        
+    with st.chat_message(message["role"], avatar=avatar):
         st.markdown(message["content"])
+
+# Conversation Starters (Only show if history is empty)
+if len(st.session_state.messages) == 0:
+    st.markdown("<div class='starter-header'>💡 예시 질문을 클릭해보세요</div>", unsafe_allow_html=True)
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("HPLC 피크 갈라짐 해결방법 알려줘", use_container_width=True):
+            st.session_state.messages.append({"role": "user", "content": "HPLC 피크 갈라짐 해결방법 알려줘"})
+            st.rerun()
+    with col2:
+        if st.button("GC 바탕선이 흔들려", use_container_width=True):
+            st.session_state.messages.append({"role": "user", "content": "GC 바탕선이 흔들려"})
+            st.rerun()
 
 # Chat Input
 if prompt := st.chat_input("증상을 입력해주세요 (예: HPLC 피크 모양이 이상해)"):
     # Display user message
-    with st.chat_message("user"):
+    with st.chat_message("user", avatar="🧑‍💻"):
         st.markdown(prompt)
     st.session_state.messages.append({"role": "user", "content": prompt})
 
     # Generate Response
-    with st.chat_message("assistant"):
+    with st.chat_message("assistant", avatar="🐻"):
         message_placeholder = st.empty()
         
         try:
@@ -217,7 +278,7 @@ if prompt := st.chat_input("증상을 입력해주세요 (예: HPLC 피크 모�
                 f"User Question: {prompt}"
             ]
             
-            model = genai.GenerativeModel("gemini-2.5-flash") # Upgraded to 2.5-flash (Newest working model)
+            model = genai.GenerativeModel("gemini-2.5-flash") # Upgraded to 2.5-flash
             response = model.generate_content(full_prompt, generation_config=generation_config)
             
             full_response = response.text

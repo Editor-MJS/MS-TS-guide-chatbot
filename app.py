@@ -123,6 +123,10 @@ Category:
 8. 대화 맥락 유지 (Context Awareness)
 * 사용자가 "더 알려줘", "다른 방법 없어?", "비슷한 거 찾아줘" 등 추가 정보를 요청하면, **이전 대화의 장비/증상 정보**를 그대로 유지하여 문서를 다시 검색한다.
 * 이때는 키워드가 없어도 예외 처리하지 않고, 이전 카테고리의 **2~3순위** 또는 **유사 카테고리** 문서를 찾아 답변한다.
+
+9. 전체 문서함 안내 (Global Folder Link)
+* 사용자가 "전체 문서를 보고 싶다", "폴더 링크 알려줘", "모든 파일 리스트" 등을 요청할 때만 아래 링크를 안내한다.
+* 전체 문서함 링크: https://works.do/FYhb6GY
 """
 
 def get_gemini_response(user_prompt):
@@ -151,14 +155,11 @@ def get_gemini_response(user_prompt):
 
     # Append Direct Links
     # 1. Detect Language (Check USER INPUT for Korean)
-    # If user input has ANY Korean -> Show KR links.
-    # If user input is ONLY English -> Show EN links.
     lang = "EN"
-    if any(0xAC00 <= ord(c) <= 0xD7A3 for c in user_prompt): # Hangul syllables in INPUT
+    if any(0xAC00 <= ord(c) <= 0xD7A3 for c in user_prompt): 
         lang = "KR"
     
-    # 2. Extract Document IDs (e.g., HPLC-029)
-    # Pattern matches HPLC-029, UPLC-001, etc.
+    # 2. Extract Document IDs
     matches = re.findall(r'(HPLC|UPLC|GC|ICP)-(\d{3})', formatted, re.IGNORECASE)
     
     unique_links = set()
@@ -175,7 +176,13 @@ def get_gemini_response(user_prompt):
                     link_markdown += f"\n\n🔗 [Open {inst}-{num}]({url})"
                 unique_links.add(url)
     
-    return formatted + link_markdown
+    # 3. Add Global Folder Link at the end of every response
+    if lang == "KR":
+        global_link = "\n\n---\n💡 찾으시는 문서가 없나요? [**전체 문서함(폴더)**](https://works.do/FYhb6GY)에서 직접 확인하실 수 있습니다."
+    else:
+        global_link = "\n\n---\n💡 Can't find what you're looking for? You can check the [**Entire Folder**](https://works.do/FYhb6GY) directly."
+    
+    return formatted + link_markdown + global_link
 
 # Streamlit UI
 st.set_page_config(page_title="MS·TS guide chatbot", page_icon="🐻", layout="centered")
@@ -345,8 +352,8 @@ if len(st.session_state.messages) == 0:
         if st.button("HPLC 피크 갈라짐 해결방법 알려줘", use_container_width=True):
             handle_starter_click("HPLC 피크 갈라짐 해결방법 알려줘")
     with col2:
-        if st.button("GC 바탕선이 흔들려", use_container_width=True):
-            handle_starter_click("GC 바탕선이 흔들려")
+        if st.button("HPLC 결과 재현성이 안 좋아", use_container_width=True):
+            handle_starter_click("HPLC 결과 재현성이 안 좋아")
 
 # Chat Input
 if prompt := st.chat_input("증상을 입력해주세요 (예: HPLC 피크 모양이 이상해)"):

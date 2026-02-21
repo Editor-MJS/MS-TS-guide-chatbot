@@ -29,11 +29,14 @@ generation_config = {
 def load_document_links():
     links = {}
     try:
-        with open('document_links.csv', mode='r', encoding='utf-8') as f:
+        # Check both local and parent for CSV
+        csv_path = 'document_links.csv'
+        if not os.path.exists(csv_path):
+            csv_path = os.path.join('..', 'document_links.csv')
+            
+        with open(csv_path, mode='r', encoding='utf-8') as f:
             reader = csv.DictReader(f)
             for row in reader:
-                # Key: (EQUIPMENT, SHEET_NO, LANGUAGE)
-                # Ensure sheet_no is 3 digits if needed, but CSV already has 030
                 key = (row['equipment'].upper(), row['sheet_no'], row['language'].upper())
                 if row['link'] and row['link'].strip():
                     links[key] = row['link'].strip()
@@ -53,13 +56,13 @@ SYSTEM_PROMPT = """
 * 단, Title과 Sheet No는 언어와 상관없이 원문 그대로 출력(번역 금지).
 
 2. 역할
-* 업로드된 인덱스 요약 PDF만 근거로, 관련 문서의 Sheet No / Title / Instrument만 안내한다.
+* 업로드된 인덱스만 근거로, 관련 문서의 Sheet No / Title / Instrument만 안내한다.
 * 해결 방법, 원인, 절차, 일반 조언은 절대 출력하지 않는다.
 * 허용되는 추가 문장은 분류 근거 1줄뿐이다.
 
 3. 내부 추출(출력 금지, 필수)
-* 장비: 메시지에서 hplc/uplc/gc/icp 중 포함된 것을 대소문자 무시로 1개 선택.
-* 증상: 아래 규칙으로 Troubleshooting Category 1개를 반드시 선택 시도한다.
+* 장비: 메시지에서 언급된 분석 기기 명칭(HPLC, UPLC, GC, ICP 등)을 추출한다. 인덱스에 새로운 장비가 추가되어도 해당 명칭을 인식해야 한다.
+* 증상: 아래 규칙으로 Troubleshooting Category 1개를 반드시 선택 시도한다. (모든 장비에 공통 적용)
   Peak shape: 피크, peak, 모양, 형태, 형상, shape, tailing, fronting, splitting, broadening
   RT/Reproducibility: RT, shift, 밀림, 변화, 재현성, 반복성, reproducibility
   Baseline/Noise: baseline, 베이스라인, noise, 노이즈, drift
@@ -70,35 +73,19 @@ SYSTEM_PROMPT = """
   Sensitivity: sensitivity, 감도, 신호 약함
   Software/Connectivity: software, connectivity, 소프트웨어, 연결, 통신, 로그인
   Detector: detector, 디텍터, 검출기
-* UV/RID/ELSD 등은 모듈로만 저장하고, 증상 키워드로 단독 사용 금지.
+* 특정 기기 전용 모듈(UV, RID, ELSD 등)은 참고 정보로만 활용한다.
 
 4. 매칭(예외 방지 핵심, 강제)
 * 문서 매칭 0건을 선언하기 전에 반드시 아래 검색을 순서대로 수행한다. (총 3회 검색 강제)
-  검색1: 사용자 증상 표현 그대로(예: 피크 모양, peak shape 등)
-  검색2: 선택된 Category 이름 자체(예: Peak shape, RT/Reproducibility 등)
+  검색1: 사용자 증상 표현 그대로
+  검색2: 선택된 Category 이름 자체
   검색3: Category 대표 확장어
-  Peak shape면 tailing OR fronting OR splitting OR broadening OR peak
-  RT/Reproducibility면 RT OR shift OR reproducibility
-  Baseline/Noise면 baseline OR noise OR drift
-  Pressure/Flow면 pressure OR flow OR fluctuation
-  Carryover면 carryover
-  Leak면 leak
-  Autosampler면 autosampler
-  Sensitivity면 sensitivity
-  Software/Connectivity면 connectivity OR software
-  Detector면 detector
 * 위 3회 검색 중 1회라도 인덱스에서 관련 항목이 나오면 예외를 절대 출력하지 말고 문서를 제시한다.
 
 5. 시트번호 인식/정규화(강제)
-* 인덱스에서 아래 형식들을 모두 시트번호로 인식한다.
-  HPLC-숫자, HPLC_숫자, HPLC숫자, HPLC 공백 숫자 (숫자 1~3자리 허용)
-* 출력은 반드시 HPLC-###로 패딩하여 표기한다.
-  예: HPLC-29, HPLC_29, HPLC029, HPLC 29 -> HPLC-029
-* 출력에 HPLC-###가 1개도 없으면 그때만 예외 처리 가능.
+* 출력은 반드시 [장비명]-[###] 형식으로 패딩하여 표기한다. (예: HPLC-029)
 
 6. 랭킹(최대 3개)
-* 1순위: Title/키워드/트리거에 증상 단어 또는 확장어가 포함된 항목
-* 2~3순위: 동일 Category로 분류되는 항목
 * 최대 3개만 출력. 없으면 해당 줄 자체를 출력하지 않는다.
 
 7. 출력(템플릿 고정, 추가 텍스트 금지, 줄바꿈 필수)
@@ -110,31 +97,28 @@ SYSTEM_PROMPT = """
 Doc Type: Troubleshooting
 Category:
 
-확인할 문서 (각 순위마다 반드시 줄바꿈 할 것)
+확인할 문서
 1순위: Sheet No / Title / Instrument
 <줄바꿈>
 2순위: (있을 때만)
 <줄바꿈>
 3순위: (있을 때만)
 
-열람 방법(고정)
-보안 링크에 접속한 후 해당 장비 폴더(HPLC/UPLC/GC/ICP)에서 해당 번호의 PDF를 열람하시면 됩니다.
+열람 방법
+보안 링크에 접속한 후 해당 장비 폴더에서 해당 번호의 PDF를 열람하시면 됩니다.
 
 8. 대화 맥락 유지 (Context Awareness)
-* 사용자가 "더 알려줘", "다른 방법 없어?", "비슷한 거 찾아줘" 등 추가 정보를 요청하면, **이전 대화의 장비/증상 정보**를 그대로 유지하여 문서를 다시 검색한다.
-* 이때는 키워드가 없어도 예외 처리하지 않고, 이전 카테고리의 **2~3순위** 또는 **유사 카테고리** 문서를 찾아 답변한다.
+* 사용자가 "더 알려줘", "다른 방법 없어?" 등 추가 정보를 요청하면, 이전 대화의 장비/증상 정보를 유지하여 문서를 다시 검색한다.
 
 9. 전체 문서함 안내 (Global Folder Link)
-* 사용자가 "전체 문서를 보고 싶다", "폴더 링크 알려줘", "모든 파일 리스트" 등을 요청할 때만 아래 링크를 안내한다.
+* 사용자가 "전체 문서", "폴더 링크" 등을 요청할 때만 아래 링크를 안내한다.
 * 전체 문서함 링크: https://works.do/FYhb6GY
 """
 
 def get_gemini_response(user_prompt):
-    # Context Construction
     conversation_history = ""
-    # Retrieve last 2 turns (User + Assistant) for context if available
     if "messages" in st.session_state and len(st.session_state.messages) > 0:
-        recent_msgs = st.session_state.messages[-4:] # Get last 2 interactions
+        recent_msgs = st.session_state.messages[-4:]
         for msg in recent_msgs:
             role = "User" if msg["role"] == "user" else "Assistant"
             conversation_history += f"{role}: {msg['content']}\n"
@@ -146,21 +130,17 @@ def get_gemini_response(user_prompt):
         f"User Question: {user_prompt}"
     ]
     
-    model = genai.GenerativeModel("gemini-2.5-flash") # Upgraded to 2.5-flash
+    model = genai.GenerativeModel("gemini-2.5-flash")
     response = model.generate_content(full_prompt, generation_config=generation_config)
     
     full_response = response.text
-    # Post-processing to enforce newlines
     formatted = full_response.replace("1순위:", "\n1순위:").replace("2순위:", "\n\n2순위:").replace("3순위:", "\n\n3순위:")
 
-    # Append Direct Links
-    # 1. Detect Language (Check USER INPUT for Korean)
     lang = "EN"
     if any(0xAC00 <= ord(c) <= 0xD7A3 for c in user_prompt): 
         lang = "KR"
     
-    # 2. Extract Document IDs
-    matches = re.findall(r'(HPLC|UPLC|GC|ICP)-(\d{3})', formatted, re.IGNORECASE)
+    matches = re.findall(r'([A-Za-z]+)-(\d{3})', formatted, re.IGNORECASE)
     
     unique_links = set()
     link_markdown = ""
@@ -176,7 +156,6 @@ def get_gemini_response(user_prompt):
                     link_markdown += f"\n\n🔗 [Open {inst}-{num}]({url})"
                 unique_links.add(url)
     
-    # 3. Add Global Folder Link at the end of every response
     if lang == "KR":
         global_link = "\n\n---\n💡 찾으시는 문서가 없나요? [**전체 문서함(폴더)**](https://works.do/FYhb6GY)에서 직접 확인하실 수 있습니다."
     else:
@@ -185,193 +164,70 @@ def get_gemini_response(user_prompt):
     return formatted + link_markdown + global_link
 
 # Streamlit UI
-st.set_page_config(page_title="MS·TS guide chatbot", page_icon="🐻", layout="centered")
+st.set_page_config(page_title="MS·TS guide chatbot (Trial)", page_icon="🐻", layout="centered")
 
-# Custom CSS for Premium Design & Gradient Header
+# Custom CSS for Premium Design
 st.markdown("""
 <style>
-    /* Global Font & Reset */
     @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@300;400;600;700&display=swap');
-    
-    html, body, [class*="css"] {
-        font-family: 'Pretendard', sans-serif;
-        color: #333333;
-    }
-
-    /* Main Background */
-    .stApp {
-        background-color: #ffffff;
-    }
-
-    /* Hide default Streamlit Header */
+    html, body, [class*="css"] { font-family: 'Pretendard', sans-serif; }
+    .stApp { background-color: #ffffff; }
     header {visibility: hidden;}
-
-    /* Premium Gradient Header Container */
     .header-container {
-        background: linear-gradient(135deg, #2b5876 0%, #4e4376 100%);  /* Deep Blue/Purple Gradient */
-        /* Alternative brighter gradient matching image: */
         background: linear-gradient(135deg, #3B28CC 0%, #E062E6 100%);
         padding: 3rem 2rem;
         border-radius: 0 0 25px 25px;
         color: white;
         margin-bottom: 2rem;
-        text-align: left;
         box-shadow: 0 4px 15px rgba(0,0,0,0.1);
     }
-    
-    .header-title {
-        font-size: 2.2rem;
-        font-weight: 700;
-        margin-bottom: 0.5rem;
-    }
-    
-    .header-subtitle {
-        font-size: 1rem;
-        opacity: 0.9;
-        font-weight: 300;
-    }
-
-    /* Chat Message Styling */
-    [data-testid="stChatMessage"] {
-        background-color: transparent;
-        padding: 1rem 0;
-    }
-    
-    /* Avatar Styling */
-    [data-testid="stChatMessage"] .st-emotion-cache-1p1m4ay {
-        border-radius: 50%;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    }
-
-    /* Message Bubbles */
-    [data-testid="stChatMessageContent"] {
-        padding: 1rem 1.2rem;
-        border-radius: 18px;
-        box-shadow: 0 2px 5px rgba(0,0,0,0.05);
-        font-size: 0.95rem;
-        line-height: 1.5;
-        max-width: 85%;
-    }
-
-    /* Assistant Message (Left) */
-    div[data-testid="stChatMessage"]:nth-child(even) {
-        flex-direction: row !important;
-    }
-    div[data-testid="stChatMessage"]:nth-child(even) [data-testid="stChatMessageContent"] {
+    [data-testid="stChatMessage"]:nth-child(even) [data-testid="stChatMessageContent"] {
         background-color: #f1f3f5 !important;
-        color: #333333 !important;
         border-radius: 18px 18px 18px 2px !important;
     }
-    
-    /* User Message (Right) */
     div[data-testid="stChatMessage"]:nth-child(odd) {
         flex-direction: row-reverse !important;
-        text-align: right !important;
     }
     div[data-testid="stChatMessage"]:nth-child(odd) [data-testid="stChatMessageContent"] {
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
         color: #ffffff !important;
         border-radius: 18px 18px 2px 18px !important;
         text-align: left !important;
-        margin-right: 10px !important;
-    }
-    
-    /* Avatar Alignment adjustment for User */
-    div[data-testid="stChatMessage"]:nth-child(odd) .st-emotion-cache-1p1m4ay {
-        margin-left: 10px !important;
-        margin-right: 0 !important;
-    }
-    
-    /* Fix text color in user bubble for markdown links/bold */
-    div[data-testid="stChatMessage"]:nth-child(odd) [data-testid="stChatMessageContent"] p,
-    div[data-testid="stChatMessage"]:nth-child(odd) [data-testid="stChatMessageContent"] strong {
-        color: #ffffff !important;
-    }
-
-    /* Conversation Starters */
-    .starter-header {
-        font-size: 0.9rem;
-        color: #888;
-        margin-bottom: 10px;
-        margin-top: 20px;
-    }
-    
-    /* Input Area Styling */
-    .stChatInputContainer {
-        padding-bottom: 1rem;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# Custom Header Display
 st.markdown("""
 <div class="header-container">
-    <div class="header-title">MS·TS guide chatbot</div>
-    <div class="header-subtitle">증상이나 문제를 입력하면 관련된 문서를 안내해드립니다.</div>
+    <div class="header-title" style="font-size:2.2rem; font-weight:700;">MS·TS Trial Chatbot</div>
+    <div class="header-subtitle" style="opacity:0.9;">JSON 인덱스 기반 자동화 실험 버전입니다.</div>
 </div>
 """, unsafe_allow_html=True)
 
-
-# Initialize Chat History
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Initialize Context (Load PDF only once)
 if "index_context" not in st.session_state:
-    with st.spinner("문서 인덱스를 불러오는 중입니다..."):
+    with st.spinner("JSON 지식을 불러오는 중입니다..."):
         st.session_state.index_context = get_index_context()
 
-# Display Chat History
 for message in st.session_state.messages:
-    # Set avatars: Orange Bear for assistant, default for user
-    if message["role"] == "assistant":
-        avatar = "🐻" 
-    else:
-        avatar = "🧑‍💻"
-        
+    avatar = "🐻" if message["role"] == "assistant" else "🧑‍💻"
     with st.chat_message(message["role"], avatar=avatar):
         st.markdown(message["content"])
 
-# Conversation Starters (Only show if history is empty)
 if len(st.session_state.messages) == 0:
-    st.markdown("<div class='starter-header'>💡 예시 질문을 클릭해보세요</div>", unsafe_allow_html=True)
-    col1, col2 = st.columns(2)
-    
-    # Helper to handle button click
-    def handle_starter_click(text):
-        st.session_state.messages.append({"role": "user", "content": text})
-        with st.spinner("답변을 생성하는 중입니다..."):
-            try:
-                response = get_gemini_response(text)
-                st.session_state.messages.append({"role": "assistant", "content": response})
-            except Exception as e:
-                st.session_state.messages.append({"role": "assistant", "content": f"오류 발생: {str(e)}"})
+    st.markdown("<div style='color: #888; font-size: 0.9rem; margin-bottom: 10px;'>💡 테스트 질문</div>", unsafe_allow_html=True)
+    if st.button("HPLC 피크 갈라짐 해결방법 알려줘", use_container_width=True):
+        st.session_state.messages.append({"role": "user", "content": "HPLC 피크 갈라짐 해결방법 알려줘"})
         st.rerun()
 
-    with col1:
-        if st.button("HPLC 피크 갈라짐 해결방법 알려줘", use_container_width=True):
-            handle_starter_click("HPLC 피크 갈라짐 해결방법 알려줘")
-    with col2:
-        if st.button("HPLC 결과 재현성이 안 좋아", use_container_width=True):
-            handle_starter_click("HPLC 결과 재현성이 안 좋아")
-
-# Chat Input
-if prompt := st.chat_input("증상을 입력해주세요 (예: HPLC 피크 모양이 이상해)"):
-    # Display user message
+if prompt := st.chat_input("테스트 질문을 입력하세요"):
     with st.chat_message("user", avatar="🧑‍💻"):
         st.markdown(prompt)
     st.session_state.messages.append({"role": "user", "content": prompt})
 
-    # Generate Response
     with st.chat_message("assistant", avatar="🐻"):
-        message_placeholder = st.empty()
-        
-        try:
-            full_response = get_gemini_response(prompt)
-            message_placeholder.markdown(full_response)
-            st.session_state.messages.append({"role": "assistant", "content": full_response})
-            
-        except Exception as e:
-            error_message = f"오류가 발생했습니다: {str(e)}"
-            message_placeholder.error(error_message)
-            st.session_state.messages.append({"role": "assistant", "content": error_message})
+        response = get_gemini_response(prompt)
+        st.markdown(response)
+        st.session_state.messages.append({"role": "assistant", "content": response})

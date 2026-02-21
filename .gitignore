@@ -1,14 +1,33 @@
-.env
-__pycache__/
-*.pdf
-# We will upload the specific index PDF manually or include it if not confidential, 
-# but usually large files or sensitive data should be handled carefully.
-# For this task, the user wants to use the PDF "HPLC_001-030_문서요약_인덱스.pdf".
-# If it's internal company data, be careful. 
-# However, for Streamlit Cloud to work, the PDF *must* be in the repo 
-# UNLESS we use a cloud storage URL.
-# Given the user context, they probably need to upload it to the private repo.
-# So I will NOT ignore the specific PDF, but I WILL ignore .env.
+# [불필요한 파일 무시 목록]
 
-# Ignore system files
-.DS_Store
+# 1. 엑셀 원본 및 변환 폴더 (무거우므로 제외)
+Input_Excel/
+Input_Excel_offline/
+HPLC_Kor/
+HPLC_En/
+Output_Kor/
+Output_en/
+Output_Kor_offline/
+Output_en_offline/
+__pycache__/
+
+# 2. 개별 엑셀/PDF 파일 (지식 베이스 제외)
+*.xlsx
+*.pdf
+!document_links.xlsx
+!Chatbot_Index_Output/*.json
+
+# 3. 보조 이미지 및 임시 폴더
+*.jpg
+*.png
+new trial/
+
+# 4. 보안 설정 (절대 올라가면 안 됨)
+.env
+
+# 5. 로컬 전용 실행 파일
+*.bat
+convert_links.py
+test_chatbot_script.py
+excel_to_pdf_*.py
+Summary_Index_Maker_*.py

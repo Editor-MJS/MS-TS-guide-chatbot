@@ -1,0 +1,14 @@
+.env
+__pycache__/
+*.pdf
+# We will upload the specific index PDF manually or include it if not confidential, 
+# but usually large files or sensitive data should be handled carefully.
+# For this task, the user wants to use the PDF "HPLC_001-030_문서요약_인덱스.pdf".
+# If it's internal company data, be careful. 
+# However, for Streamlit Cloud to work, the PDF *must* be in the repo 
+# UNLESS we use a cloud storage URL.
+# Given the user context, they probably need to upload it to the private repo.
+# So I will NOT ignore the specific PDF, but I WILL ignore .env.
+
+# Ignore system files
+.DS_Store

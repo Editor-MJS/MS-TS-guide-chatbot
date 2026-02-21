@@ -1,4 +1,11 @@
+<<<<<<< HEAD
 streamlit
 google-generativeai
 pypdf
 python-dotenv
+=======
+streamlit
+google-generativeai
+pypdf
+python-dotenv
+>>>>>>> f5fe1befdc3271d8a134bc7a1d19495110784564

@@ -52,7 +52,7 @@ def get_gemini_response(user_prompt):
     [User Question]
     {user_prompt}
     """
-    model = genai.GenerativeModel("gemini-1.5-flash") # 추천받은 가장 안정적인 모델명
+    model = genai.GenerativeModel("gemini-2.5-flash") # 어제 정상 작동했던 원래 모델명
     response = model.generate_content(full_prompt)
     text = response.text
     

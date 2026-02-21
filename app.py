@@ -10,11 +10,11 @@ from utils import get_index_context
 load_dotenv()
 api_key = os.getenv("GOOGLE_API_KEY")
 if not api_key:
-    st.error("Google API Key not found.")
+    st.error("API Key가 없습니다. .env 파일이나 클라우드 설정을 확인하세요.")
     st.stop()
 genai.configure(api_key=api_key)
 
-# 1. 문서 링크 로드 (Excel 기반)
+# 1. 엑셀에서 문서 링크 불러오기
 def load_document_links():
     links = {}
     try:
@@ -37,32 +37,26 @@ def load_document_links():
 
 DOCUMENT_LINKS = load_document_links()
 
-# 2. 시스템 지침 (똑똑한 검색 로직)
-SYSTEM_PROMPT = """
-## QC 분석기기 지침서 안내 봇
-1. 제공된 INDEX DATA 내에서만 답변하세요.
-2. 해결 방법이나 절차는 생략하고, 오직 [Sheet No / Title / Instrument] 정보만 제공하세요.
-3. 출력 형식: [장비명]-[번호3자리] (예: HPLC-029)
-4. 질문에 한글이 있으면 한국어로, 영어만 있으면 영어로 답변하세요.
-"""
-
+# 2. AI 응답 로직 (모델명: gemini-1.5-flash)
 def get_gemini_response(user_prompt):
     full_prompt = f"""
-    [SYSTEM]
-    {SYSTEM_PROMPT}
-    
+    당신은 품질 관리(QC) 분석기기 문서 안내 봇입니다.
+    아래 [INDEX DATA]를 참고하여 사용자가 찾는 문서의 번호(Sheet No), 제목(Title), 장비(Instrument)를 안내하세요.
+    - 답변 형식: [장비명]-[번호3자리] (예: HPLC-029)
+    - 해결 방법은 설명하지 마세요.
+    - 한국어 질문에는 한국어로 답변하세요.
+
     [INDEX DATA]
     {st.session_state.index_context}
-    
-    [USER QUESTION]
+
+    [User Question]
     {user_prompt}
     """
-    # 가장 안정적인 모델 명칭 사용
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    model = genai.GenerativeModel("gemini-1.5-flash") # 추천받은 가장 안정적인 모델명
     response = model.generate_content(full_prompt)
     text = response.text
     
-    # 링크 매칭
+    # 링크 버튼 생성
     lang = "KR" if any(0xAC00 <= ord(c) <= 0xD7A3 for c in user_prompt) else "EN"
     matches = re.findall(r'([A-Za-z]+)-(\d{3})', text)
     link_md = ""
@@ -72,14 +66,14 @@ def get_gemini_response(user_prompt):
         if key in DOCUMENT_LINKS:
             url = DOCUMENT_LINKS[key]
             if url not in unique_links:
-                label = f"{inst}-{num} 문서 바로가기" if lang == "KR" else f"Open {inst}-{num}"
+                label = f"{inst}-{num} 문서 바로가기" if lang == "KR" else f"Direct Link: {inst}-{num}"
                 link_md += f"\n\n🔗 [{label}]({url})"
                 unique_links.add(url)
     
-    footer = "\n\n---\n💡 문서를 못 찾으셨나요? [**전체 폴더 가기**](https://works.do/FYhb6GY)" if lang=="KR" else "\n\n---\n💡 [**Entire Folder**](https://works.do/FYhb6GY)"
+    footer = "\n\n---\n💡 찾으시는 문서가 없나요? [**전체 폴더 가기**](https://works.do/FYhb6GY)" if lang=="KR" else "\n\n---\n💡 [**Entire Folder**](https://works.do/FYhb6GY)"
     return text + link_md + footer
 
-# 3. 프리미엄 UI 디자인 (어제 버전 복구)
+# 3. 프리미엄 디자인 UI
 st.set_page_config(page_title="MS·TS Guide Chatbot", page_icon="🐻", layout="centered")
 
 st.markdown("""
@@ -112,26 +106,26 @@ st.markdown("""
 
 if "messages" not in st.session_state: st.session_state.messages = []
 if "index_context" not in st.session_state:
-    st.session_state.index_context = get_index_context()
+    with st.spinner("지식 로딩 중..."):
+        st.session_state.index_context = get_index_context()
 
 for m in st.session_state.messages:
     with st.chat_message(m["role"], avatar="🐻" if m["role"]=="assistant" else "🧑‍💻"):
         st.markdown(m["content"])
 
-# 대화 스타터 버튼 복구
+# 어제의 예시 질문 버튼 복구
 if not st.session_state.messages:
     st.markdown("<div style='color: #888; font-size: 0.9rem; margin-bottom: 10px;'>💡 자주 묻는 질문</div>", unsafe_allow_html=True)
     c1, c2 = st.columns(2)
-    def handle_click(q):
+    def click_starter(q):
         st.session_state.messages.append({"role": "user", "content": q})
         with st.chat_message("assistant", avatar="🐻"):
             res = get_gemini_response(q)
             st.markdown(res)
             st.session_state.messages.append({"role": "assistant", "content": res})
         st.rerun()
-
-    if c1.button("HPLC 피크 갈라짐 해결방법", use_container_width=True): handle_click("HPLC 피크 갈라짐 해결방법 알려줘")
-    if c2.button("HPLC 결과 재현성 문제", use_container_width=True): handle_click("HPLC 결과 재현성이 안 좋아")
+    if c1.button("HPLC 피크 갈라짐 해결방법", use_container_width=True): click_starter("HPLC 피크 갈라짐 해결방법 알려줘")
+    if c2.button("HPLC 결과 재현성 문제", use_container_width=True): click_starter("HPLC 결과 재현성이 안 좋아")
 
 if prompt := st.chat_input("질문을 입력하세요..."):
     st.session_state.messages.append({"role": "user", "content": prompt})

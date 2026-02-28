@@ -35,54 +35,29 @@ SYSTEM_PROMPT = """
 ## QC 분석기기 문서 위치 안내 봇 지침 (가중치 시스템 적용)
 
 당신은 QC 분석기기(HPLC/UPLC)의 트러블슈팅 및 유지보수 지침을 안내하는 전문 전문가입니다.
-제시된 [INDEX DATA]의 '절대 가중치(Global Weight)'와 '문서 내 순위(Internal Rank)'를 바탕으로 가장 적합한 해결책을 추천하세요.
+제시된 [INDEX DATA]의 '절대 가중치(Global Weight)'와 '문서 내 순위(Internal Rank)'를 바탕으로 적합한 해결책을 추천하세요.
 
 1. 카테고리 매칭 규칙
-사용자의 질문을 분석하여 다음 카테고리 중 하나로 반드시 분류하세요.
+사용자의 질문을 분석하여 다음 카테고리 중 하나로 반드시 분류하세요. (대화에는 분류된 카테고리명만 노출)
+- 트러블슈팅: 압력 및 유량 이상, 베이스라인 불안정, 머무름 시간 변동, 면적 및 재현성 불량, 피크 모양 이상, 캐리오버 및 고스트 피크, 기계적 에러 알람
+- 유지보수: 세척 및 오염 관리, 기포 제거 및 치환, 소모품 및 부품 교체, 일상 셋업 및 안정화, 교정 및 설정 최적화
 
-🚨 트러블슈팅 (Troubleshooting): 현상 중심 (7개)
-* 압력 및 유량 이상 (Pressure & Flow)
-* 베이스라인 불안정 (Baseline & Noise)
-* 머무름 시간 변동 (Retention Time Shift)
-* 면적 및 재현성 불량 (Area & RSD)
-* 피크 모양 이상 (Peak Shape)
-* 캐리오버 및 고스트 피크 (Carryover & Ghost Peak)
-* 기계적 에러 알람 (System Error Message)
+2. 추천 로직
+* '절대 가중치(Global Weight)'가 높은 순서대로 추천합니다.
+* 반드시 인덱스 원본에 있는 '문서 번호'(예: UPLC_001, HPLC-018)를 변형 없이 그대로 출력하세요.
+* '비고(Reasoning)' 내용을 활용하여 사용자에게 기술적 근거를 설명하세요.
 
-🛠️ 유지보수 (Maintenance): 행동 중심 (5개)
-* 세척 및 오염 관리 (Cleaning & Washing)
-* 기포 제거 및 치환 (Prime & Purge)
-* 소모품 및 부품 교체 (Consumable Replacement)
-* 일상 셋업 및 안정화 (Routine Stabilization)
-* 교정 및 설정 최적화 (Calibration & Setup)
-
-2. 순위 산정 및 추천 로직
-* 1순위 추천: '절대 가중치(Global Weight)'가 가장 높은 문서를 추천합니다. (10점은 확정적 원인임)
-* '문서 내 순위(Internal Rank)'가 1인 경우, 해당 현상에 대한 가장 대표적인 해결책임을 의미합니다.
-* '비고(Reasoning)' 내용을 활용하여 왜 이 조치가 필요한지 사용자에게 설득력 있게 설명하세요.
-
-3. 출력 템플릿 (엄격 준수)
-[분류 근거]
-질문 키워드 '__'가 '__' 카테고리로 분류되었습니다. (사용자 언어에 맞춰 작성)
-
-분류
-Doc Type: [Troubleshooting / Maintenance]
-Category: [위 카테고리 중 선택]
-
-확인할 문서 (가중치 순 추천)
-1순위: [문서 번호] / [핵심 해결방법] / [장비명]
-- 설명: [비고(Reasoning) 및 가중치 근거 요약]
-
-<빈 줄>
-2순위: [문서 번호] / [핵심 해결방법] / [장비명]
-- 설명: [비고(Reasoning) 및 가중치 근거 요약]
-
-<빈 줄>
-3순위: [문서 번호] / [핵심 해결방법] / [장비명]
-- 설명: [비고(Reasoning) 및 가중치 근거 요약]
-
-4. 언어 규칙 (엄격 준수)
-* 한국어 질문 -> 한국어 답변 / English Input -> English Answer.
+3. 출력 형식 (JSON 형식으로 답변하여 파싱 가능하게 함)
+반드시 다음 구조의 JSON 형식으로만 답변하세요:
+{
+  "classification": "카테고리명",
+  "reason": "분류 근거 설명",
+  "type": "Troubleshooting/Maintenance",
+  "recommendations": [
+    {"no": "문서번호", "fix": "해결방법", "instrument": "장비명", "reasoning": "설명/근거", "weight": 점수},
+    ... 관련 있는 모든 문서를 가중치 순으로 나열 ...
+  ]
+}
 """
 
 def get_gemini_response(user_prompt):
@@ -97,34 +72,63 @@ def get_gemini_response(user_prompt):
     """
     
     try:
-        model = genai.GenerativeModel("gemini-2.5-flash")
-        response = model.generate_content(full_prompt)
-        text = response.text
+        model = genai.GenerativeModel("gemini-2.0-flash")
+        response = model.generate_content(full_prompt, generation_config={"response_mime_type": "application/json"})
+        import json
+        data = json.loads(response.text)
+        
+        # 세션 상태에 모든 추천 결과 저장
+        st.session_state.current_recommendations = data['recommendations']
+        st.session_state.current_page = 0
+        st.session_state.current_classification = data['classification']
+        st.session_state.current_reason = data['reason']
+        st.session_state.current_type = data['type']
+        
+        return format_recommendations(lang)
     except Exception as e:
         error_msg = str(e)
         if "ResourceExhausted" in error_msg or "429" in error_msg:
             return "⚠️ **일시적인 서버 요청 초과입니다.**\n\n현재 답변 요청이 너무 많아 구글 서버의 분당 무료 한도를 초과했습니다. 약 1분 정도 기다리신 후에 다시 질문해 주세요!"
         else:
-            return f"⚠️ **에러가 발생했습니다.**\n\n개발자에게 다음 메시지를 전달해 주세요: {error_msg}"
+            return f"⚠️ **에러가 발생했습니다.** {error_msg}"
+
+def format_recommendations(lang):
+    recs = st.session_state.current_recommendations
+    start_idx = st.session_state.current_page * 3
+    end_idx = start_idx + 3
+    current_recs = recs[start_idx:end_idx]
     
-    # 가독성 보정: 1, 2, 3순위 앞에 줄바꿈 강제 추가
-    formatted_text = text.replace("2순위:", "\n\n2순위:").replace("3순위:", "\n\n3순위:")
+    if not current_recs:
+        return "더 이상 추천할 문서가 없습니다."
+
+    output = f"### [분류 근거]\n{st.session_state.current_reason}\n\n"
+    output += f"**분류**\nDoc Type: {st.session_state.current_type}\nCategory: {st.session_state.current_classification}\n\n"
+    output += "### 확인할 문서 (가중치 순 추천)\n"
     
-    # 링크 버튼 로직
-    matches = re.findall(r'([A-Za-z]+)-(\d{3})', formatted_text)
-    link_md = ""
-    unique_links = set()
-    for inst, num in matches:
-        key = (inst.upper(), num, lang)
-        if key in DOCUMENT_LINKS:
-            url = DOCUMENT_LINKS[key]
-            if url not in unique_links:
-                label = f"{inst}-{num} 문서 바로가기" if lang == "KR" else f"Direct Link: {inst}-{num}"
-                link_md += f"\n\n🔗 [{label}]({url})"
-                unique_links.add(url)
+    for i, r in enumerate(current_recs):
+        rank = start_idx + i + 1
+        output += f"**{rank}순위: {r['no']} / {r['fix']} / {r['instrument']}**\n"
+        output += f"- 설명: {r['reasoning']} (가중치: {r['weight']}점)\n\n"
+        
+        # 링크 추가
+        key = (r['instrument'].upper(), r['no'].split('_')[-1].split('-')[-1], lang) # 번호만 추출 시도
+        # 더 정확한 매칭을 위해 원본 번호로도 시도
+        match = re.search(r'\d{3}', r['no'])
+        if match:
+            num_only = match.group()
+            key = (r['instrument'].upper(), num_only, lang)
+            if key in DOCUMENT_LINKS:
+                url = DOCUMENT_LINKS[key]
+                label = f"{r['no']} 문서 바로가기" if lang == "KR" else f"Direct Link: {r['no']}"
+                output += f"🔗 [{label}]({url})\n\n"
+
+    if len(recs) > end_idx:
+        output += "---\n💡 **해당 문서로 해결방법을 찾지 못했다면?**\n"
+        # 버튼 처리는 아래 UI 쪽에서 수행
+    else:
+        output += "\n\n---\n💡 찾으시는 문서가 없나요? [**전체 문서함(폴더)**](https://works.do/FYhb6GY)" if lang=="KR" else "\n\n---\n💡 [**Check Entire Folder**](https://works.do/FYhb6GY)"
     
-    footer = "\n\n---\n💡 찾으시는 문서가 없나요? [**전체 문서함(폴더)**](https://works.do/FYhb6GY)" if lang=="KR" else "\n\n---\n💡 [**Check Entire Folder**](https://works.do/FYhb6GY)"
-    return formatted_text + link_md + footer
+    return output
 
 # 3. UI 디자인
 st.set_page_config(page_title="MS·TS guide chatbot", page_icon="🐻", layout="centered")
@@ -138,6 +142,7 @@ st.markdown("""
         background: linear-gradient(135deg, #3B28CC 0%, #E062E6 100%);
         padding: 3rem 2rem; border-radius: 0 0 25px 25px; color: white; margin-bottom: 2rem;
     }
+    .stButton>button { border-radius: 12px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -151,10 +156,22 @@ st.markdown("""
 if "messages" not in st.session_state: st.session_state.messages = []
 if "index_context" not in st.session_state:
     st.session_state.index_context = get_index_context()
+if "current_recommendations" not in st.session_state: st.session_state.current_recommendations = []
 
 for m in st.session_state.messages:
     with st.chat_message(m["role"], avatar="🐻" if m["role"]=="assistant" else "🧑‍💻"):
         st.markdown(m["content"])
+
+# 다음 가중치 버튼 처리
+if st.session_state.current_recommendations and (st.session_state.current_page + 1) * 3 < len(st.session_state.current_recommendations):
+    if st.button("🔽 해당 문서로 해결방법을 찾지 못했다면? 다음 가중치 문서 보기", use_container_width=True):
+        st.session_state.current_page += 1
+        lang = "KR" if any(0xAC00 <= ord(c) <= 0xD7A3 for c in st.session_state.messages[-1]["content"]) else "EN"
+        res = format_recommendations(lang)
+        with st.chat_message("assistant", avatar="🐻"):
+            st.markdown(res)
+            st.session_state.messages.append({"role": "assistant", "content": res})
+        st.rerun()
 
 # 스타터 버튼
 if not st.session_state.messages:
@@ -179,3 +196,4 @@ if prompt := st.chat_input("질문을 입력하세요..."):
         res = get_gemini_response(prompt)
         st.markdown(res)
         st.session_state.messages.append({"role": "assistant", "content": res})
+    st.rerun()

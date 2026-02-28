@@ -4,7 +4,7 @@ import os
 import csv
 import re
 from dotenv import load_dotenv
-from utils import get_index_context
+from utils import get_vector_db
 
 # 0. 초기 설정
 load_dotenv()
@@ -30,12 +30,13 @@ def load_document_links():
 
 DOCUMENT_LINKS = load_document_links()
 
-# 2. 강화된 시스템 지침 (가중치 기반 검색 및 가속성 최적화)
+# 2. 강화된 시스템 지침 (가중치 및 벡터 DB 최적화)
 SYSTEM_PROMPT = """
 ## QC 분석기기 문서 위치 안내 봇 지침 (가중치 시스템 적용)
 
 당신은 QC 분석기기(HPLC/UPLC)의 트러블슈팅 및 유지보수 지침을 안내하는 전문 전문가입니다.
-제시된 [INDEX DATA]의 '절대 가중치(Global Weight)'와 '문서 내 순위(Internal Rank)'를 바탕으로 적합한 해결책을 추천하세요.
+제시된 [RETRIEVED DATA]는 사용자의 질문과 의미상 가장 유사한 상위 15개의 문서입니다.
+이 데이터의 'Weight(절대 가중치)'와 'InternalRank(문서 내 순위)'를 최우선으로 고려하여 가장 적합한 해결책을 추천하세요.
 
 1. 카테고리 매칭 규칙
 사용자의 질문을 분석하여 다음 카테고리 중 하나로 반드시 분류하세요. (대화에는 분류된 카테고리명만 노출)
@@ -43,9 +44,9 @@ SYSTEM_PROMPT = """
 - 유지보수: 세척 및 오염 관리, 기포 제거 및 치환, 소모품 및 부품 교체, 일상 셋업 및 안정화, 교정 및 설정 최적화
 
 2. 추천 로직
-* '절대 가중치(Global Weight)'가 높은 순서대로 추천합니다.
-* 반드시 인덱스 원본에 있는 '문서 번호'(예: UPLC_001, HPLC-018)를 변형 없이 그대로 출력하세요.
-* '비고(Reasoning)' 내용을 활용하여 사용자에게 기술적 근거를 설명하세요.
+* 제공된 [RETRIEVED DATA] 안에서 'Weight'가 높은 순서대로 답변을 구성합니다.
+* 반드시 데이터에 있는 'DocNo'(예: UPLC_001, HPLC-018)를 변형 없이 사용하세요.
+* 'Reasoning(비고/설명)' 내용을 자연스럽게 풀어내어 사용자에게 조치 근거를 설명하세요.
 
 3. 출력 형식 (JSON 형식으로 답변하여 파싱 가능하게 함)
 반드시 다음 구조의 JSON 형식으로만 답변하세요:
@@ -55,7 +56,7 @@ SYSTEM_PROMPT = """
   "type": "Troubleshooting/Maintenance",
   "recommendations": [
     {"no": "문서번호", "fix": "해결방법", "instrument": "장비명", "reasoning": "설명/근거", "weight": 점수},
-    ... 관련 있는 모든 문서를 가중치 순으로 나열 ...
+    ... 관련 있는 문서들(최대 10개)을 가중치 순으로 나열 ...
   ]
 }
 """
@@ -63,10 +64,21 @@ SYSTEM_PROMPT = """
 def get_gemini_response(user_prompt):
     lang = "KR" if any(0xAC00 <= ord(c) <= 0xD7A3 for c in user_prompt) else "EN"
     
+    # [핵심] 엑셀 전체가 아닌, Vector DB에서 질문과 관련성 높은 TOP 15개만 추출 (Token 절약)
+    if st.session_state.vector_db is None:
+        return "⚠️ 데이터베이스가 초기화되지 않았습니다. 관리자에게 문의하세요."
+        
+    retrieved_docs = st.session_state.vector_db.similarity_search(user_prompt, k=15)
+    
+    retrieved_context = "## [RETRIEVED DATA]\n"
+    for d in retrieved_docs:
+        m = d.metadata
+        retrieved_context += f"- DocNo: {m.get('doc_no')} | Fix: {m.get('fix')} | Symptom: {m.get('symptom')} | InternalRank: {m.get('rank')} | Weight: {m.get('weight')} | Reasoning: {m.get('reasoning')}\n"
+    
     full_prompt = f"""
     {SYSTEM_PROMPT}
-    [INDEX DATA]
-    {st.session_state.index_context}
+    {retrieved_context}
+    
     [USER QUESTION]
     {user_prompt}
     """
@@ -78,11 +90,11 @@ def get_gemini_response(user_prompt):
         data = json.loads(response.text)
         
         # 세션 상태에 모든 추천 결과 저장
-        st.session_state.current_recommendations = data['recommendations']
+        st.session_state.current_recommendations = data.get('recommendations', [])
         st.session_state.current_page = 0
-        st.session_state.current_classification = data['classification']
-        st.session_state.current_reason = data['reason']
-        st.session_state.current_type = data['type']
+        st.session_state.current_classification = data.get('classification', '')
+        st.session_state.current_reason = data.get('reason', '')
+        st.session_state.current_type = data.get('type', '')
         
         return format_recommendations(lang)
     except Exception as e:
@@ -154,8 +166,9 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 if "messages" not in st.session_state: st.session_state.messages = []
-if "index_context" not in st.session_state:
-    st.session_state.index_context = get_index_context()
+if "vector_db" not in st.session_state:
+    with st.spinner("AI가 지침서 데이터베이스를 최적화하고 있습니다... (처음 1회만 소요)"):
+        st.session_state.vector_db = get_vector_db()
 if "current_recommendations" not in st.session_state: st.session_state.current_recommendations = []
 
 for m in st.session_state.messages:

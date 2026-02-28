@@ -4,3 +4,6 @@ pypdf
 python-dotenv
 pandas
 openpyxl
+langchain
+langchain-google-genai
+faiss-cpu

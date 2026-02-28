@@ -1,29 +1,55 @@
 import pandas as pd
 import os
+import streamlit as st
+from langchain_community.vectorstores import FAISS
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from langchain_core.documents import Document
+from dotenv import load_dotenv
 
-def get_index_context():
-    """엑셀 가중치 인덱스를 로드하여 텍스트 컨텍스트로 변환"""
+load_dotenv()
+
+@st.cache_resource
+def get_vector_db():
     folder = "인덱스_가중치_모음"
     files = ["HPLC_가중치 인덱스.xlsx", "UPLC_가중치 인덱스.xlsx"]
     
-    context = "## [SYSTEM INDEX DATA]\n"
+    docs = []
     
     for f in files:
         path = os.path.join(folder, f)
         if os.path.exists(path):
             instrument = f.split("_")[0]
             try:
-                df = pd.read_excel(path)
-                # 불필요한 공백 제거 및 문자열 변환
-                df = df.fillna("")
-                
-                context += f"\n### INSTRUMENT: {instrument}\n"
-                # 데이터프레임을 텍스트 형태로 변환 (Gemini가 읽기 좋게)
+                df = pd.read_excel(path).fillna("")
                 for _, row in df.iterrows():
-                    context += f"- DocNo: {row.get('문서 번호', '')} | Fix: {row.get('핵심 해결방법', '')} | Symptom: {row.get('발생 상황', '')} | InternalRank: {row.get('문서 내 순위', '')} | Weight: {row.get('절대 가중치', '')} | Reasoning: {row.get('비고', '')}\n"
+                    doc_no = str(row.get('문서 번호', '')).strip()
+                    fix = str(row.get('핵심 해결방법', ''))
+                    symptom = str(row.get('발생 상황', ''))
+                    rank = str(row.get('문서 내 순위', ''))
+                    weight = str(row.get('절대 가중치', ''))
+                    reasoning = str(row.get('비고', ''))
+                    
+                    # AI가 검색할 기반이 되는 텍스트
+                    content = f"장비: {instrument} | 현상: {symptom} | 원인 및 해결방법: {fix} | 설명: {reasoning}"
+                    
+                    # 메타데이터 (답변 생성 시 활용)
+                    metadata = {
+                        "instrument": instrument,
+                        "doc_no": doc_no,
+                        "fix": fix,
+                        "symptom": symptom,
+                        "rank": rank,
+                        "weight": weight,
+                        "reasoning": reasoning
+                    }
+                    docs.append(Document(page_content=content, metadata=metadata))
             except Exception as e:
-                context += f"\nError loading {f}: {str(e)}\n"
-        else:
-            context += f"\nFile not found: {f}\n"
-            
-    return context
+                print(f"Error loading {f}: {e}")
+                
+    if not docs:
+        return None
+        
+    embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+    vector_db = FAISS.from_documents(docs, embeddings)
+    return vector_db
+

@@ -97,7 +97,7 @@ def get_gemini_response(user_prompt):
     """
     
     try:
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        model = genai.GenerativeModel("gemini-2.5-flash")
         response = model.generate_content(full_prompt)
         text = response.text
     except Exception as e:

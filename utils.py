@@ -2,14 +2,14 @@ import pandas as pd
 import os
 import streamlit as st
 from langchain_community.vectorstores import FAISS
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.documents import Document
 from dotenv import load_dotenv
 
 load_dotenv()
 
 @st.cache_resource
-def get_vector_db(api_key):
+def get_vector_db():
     folder = "인덱스_가중치_모음"
     files = ["HPLC_가중치 인덱스.xlsx", "UPLC_가중치 인덱스.xlsx"]
     
@@ -49,7 +49,8 @@ def get_vector_db(api_key):
     if not docs:
         return None
         
-    embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=api_key)
+    # [핵심] 구글 API 대신 로컬에서 직접 연산하는 모델 사용 (한도 에러 원천 차단)
+    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
     vector_db = FAISS.from_documents(docs, embeddings)
     return vector_db
 

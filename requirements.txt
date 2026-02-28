@@ -5,7 +5,7 @@ python-dotenv
 pandas
 openpyxl
 langchain
-langchain-google-genai
-faiss-cpu
 langchain-community
-langchain-core
+langchain-huggingface
+sentence-transformers
+faiss-cpu

@@ -7,3 +7,5 @@ openpyxl
 langchain
 langchain-google-genai
 faiss-cpu
+langchain-community
+langchain-core

@@ -168,7 +168,7 @@ st.markdown("""
 if "messages" not in st.session_state: st.session_state.messages = []
 if "vector_db" not in st.session_state:
     with st.spinner("AI가 지침서 데이터베이스를 최적화하고 있습니다... (처음 1회만 소요)"):
-        st.session_state.vector_db = get_vector_db()
+        st.session_state.vector_db = get_vector_db(api_key)
 if "current_recommendations" not in st.session_state: st.session_state.current_recommendations = []
 
 for m in st.session_state.messages:

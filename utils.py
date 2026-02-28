@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 @st.cache_resource
-def get_vector_db():
+def get_vector_db(api_key):
     folder = "인덱스_가중치_모음"
     files = ["HPLC_가중치 인덱스.xlsx", "UPLC_가중치 인덱스.xlsx"]
     
@@ -49,7 +49,7 @@ def get_vector_db():
     if not docs:
         return None
         
-    embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+    embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=api_key)
     vector_db = FAISS.from_documents(docs, embeddings)
     return vector_db
 

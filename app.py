@@ -96,9 +96,16 @@ def get_gemini_response(user_prompt):
     {user_prompt}
     """
     
-    model = genai.GenerativeModel("gemini-2.0-flash")
-    response = model.generate_content(full_prompt)
-    text = response.text
+    try:
+        model = genai.GenerativeModel("gemini-1.5-flash")
+        response = model.generate_content(full_prompt)
+        text = response.text
+    except Exception as e:
+        error_msg = str(e)
+        if "ResourceExhausted" in error_msg or "429" in error_msg:
+            return "⚠️ **일시적인 서버 요청 초과입니다.**\n\n현재 답변 요청이 너무 많아 구글 서버의 분당 무료 한도를 초과했습니다. 약 1분 정도 기다리신 후에 다시 질문해 주세요!"
+        else:
+            return f"⚠️ **에러가 발생했습니다.**\n\n개발자에게 다음 메시지를 전달해 주세요: {error_msg}"
     
     # 가독성 보정: 1, 2, 3순위 앞에 줄바꿈 강제 추가
     formatted_text = text.replace("2순위:", "\n\n2순위:").replace("3순위:", "\n\n3순위:")

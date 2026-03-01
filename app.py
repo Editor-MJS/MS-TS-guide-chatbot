@@ -57,17 +57,18 @@ SYSTEM_PROMPT = """
 
 [중요 규칙]
 1. 장비 매칭: 사용자의 질문에 특정 장비(UPLC 또는 HPLC)가 언급되었다면, 반드시 해당 장비의 문서를 최우선적으로 추천하십시오.
-2. 상세 분류: 질문을 분석하여 '트러블슈팅' 같은 넓은 범위가 아니라, '**RT 지연 현상**', '**피크 모양 이상**', '**압력 상승**' 등 구체적인 원인이나 현상 위주로 분류명을 생성하십시오.
-3. 추천 로직: 'Weight(절대 가중치)'가 높은 순서대로 답변을 구성하되, 장비 호환성을 최우선으로 합니다.
-4. 말투: 전문가답고 정중하게 답변하십시오.
+2. 상세 분류: 질문을 분석하여 구체적인 원인이나 현상(예: 'RT 지연 현상', '피크 모양 이상') 위주로 분류명을 생성하십시오.
+3. 문서 번호 유지: 반드시 데이터에 있는 'DocNo'(예: UPLC_001, HPLC-018)를 변형하지 말고 그대로 사용하십시오. 'D001'과 같이 임의로 축소하지 마십시오.
+4. 추천 로직: 'Weight'가 높은 순서대로 답변을 구성하십시오.
+5. 말투: 전문가답고 정중하게 답변하십시오.
 
 [출력 형식 (JSON)]
 반드시 다음 구조의 JSON 형식으로만 답변하세요:
 {
-  "classification": "상세 현상/원인 분류명 (예: RT 지연 현상)",
-  "reason": "분류 근거 설명 (짧고 명확하게)",
+  "classification": "현상/원인 분류명",
+  "reason": "분류 근거 (정중하고 간결하게)",
   "recommendations": [
-    {"no": "문서번호", "fix": "해결방법 요약", "instrument": "장비명", "reasoning": "설명/근거", "weight": 점수},
+    {"no": "데이터의 DocNo 그대로 (예: UPLC_001)", "fix": "해결방법 요약", "instrument": "장비명", "reasoning": "설명/근거", "weight": 점수},
     ... 관련 있는 문서들(최대 5개) ...
   ]
 }
@@ -114,35 +115,23 @@ def get_gemini_response(user_prompt):
     current_keys = API_KEYS.copy()
     random.shuffle(current_keys)
     
-    last_error = ""
-    
     for api_key in current_keys:
         genai.configure(api_key=api_key)
-        
         for model_name in models_to_try:
             try:
                 model = genai.GenerativeModel(model_name)
                 response = model.generate_content(full_prompt, generation_config={"response_mime_type": "application/json"})
-                
                 resp_json = response.text
                 if resp_json.startswith("```json"):
                     resp_json = resp_json.replace("```json", "").replace("```", "").strip()
-                
                 data = json.loads(resp_json)
-                
                 st.session_state.current_recommendations = data.get('recommendations', [])
                 st.session_state.current_page = 0
                 st.session_state.current_classification = data.get('classification', '')
                 st.session_state.current_reason = data.get('reason', '')
-                
                 return format_recommendations(lang)
-                
-            except Exception as e:
-                last_error = str(e)
-                if any(x in last_error for x in ["ResourceExhausted", "429", "quota", "Quota"]):
-                    continue 
-                else:
-                    return f"⚠️ **기술적 에러 발생 ({model_name}):** {last_error}"
+            except Exception:
+                continue
                     
     return "⚠️ **모든 방어막(API 키 및 모델)이 한도를 초과했습니다.**\n\n현재 동시 사용자가 너무 많습니다. 약 1분만 기다려 주시면 한도가 초기화됩니다."
 
@@ -155,24 +144,29 @@ def format_recommendations(lang):
     if not current_recs:
         return "더 이상 추천할 문서가 없습니다."
 
-    if lang == "KR":
-        output = f"🐻\n[분류 근거] {st.session_state.current_reason}\n\n"
-        output += f"사용자의 질문에 따라 분석결과 **{st.session_state.current_classification}**으로 분류되었습니다.\n이러한 유형에 따라 다음과 같은 문서들을 추천합니다.\n\n"
-    else:
-        output = f"🐻\n[Logic] {st.session_state.current_reason}\n\n"
-        output += f"Based on your question, it has been classified as **{st.session_state.current_classification}**.\nWe recommend the following documents:\n\n"
+    output = ""
+    # 분류 근거 (첫 페이지에서만 표시)
+    if st.session_state.current_page == 0:
+        if lang == "KR":
+            output += f"🐻\n[분류 근거] {st.session_state.current_reason}\n\n"
+            output += f"사용자의 질문에 따라 분석결과 **{st.session_state.current_classification}**으로 분류되었습니다.\n이러한 유형에 따라 다음과 같은 문서들을 추천합니다.\n\n---\n\n"
+        else:
+            output += f"🐻\n[Logic] {st.session_state.current_reason}\n\n"
+            output += f"Based on your question, it has been classified as **{st.session_state.current_classification}**.\nWe recommend the following documents:\n\n---\n\n"
     
     for i, r in enumerate(current_recs):
         rank = start_idx + i + 1
-        output += f"**{rank}순위: {r['no']} / {r['fix']} / {r['instrument']}**\n"
-        output += f"설명: {r['reasoning']} (가중치: {r['weight']}점)\n\n" # 줄바꿈 추가
+        output += f"**{rank}순위: {r['no']} / {r['fix']} / {r['instrument']}**\n\n"
+        output += f"설명: {r['reasoning']} (가중치: {r['weight']}점)\n\n"
         
+        # 링크 매칭 로직 (개선됨: D001 같은 변형 방지 및 정확한 숫자 추출)
         instr = str(r.get('instrument', '')).upper()
         doc_no = str(r.get('no', ''))
         
-        match = re.search(r'\d+', doc_no)
-        if match:
-            num = match.group().lstrip('0')
+        # 문서번호에서 마지막 숫자 뭉치 추출 (예: UPLC_001 -> 001, HPLC-18 -> 18)
+        nums = re.findall(r'\d+', doc_no)
+        if nums:
+            num = nums[-1].lstrip('0')
             if not num: num = "0"
             
             target_instr = "HPLC" if "HPLC" in instr else "UPLC"
@@ -183,7 +177,6 @@ def format_recommendations(lang):
                 label = "📄 문서 바로가기" if lang == "KR" else "📄 View Document"
                 output += f"🔗 [{label}]({url})\n\n"
         
-        # 순위 간 구분선 (선택 사항)
         if i < len(current_recs) - 1:
             output += "---\n\n"
     

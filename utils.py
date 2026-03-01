@@ -50,7 +50,8 @@ def get_vector_db():
         return None
         
     # [핵심] 구글 API 대신 로컬에서 직접 연산하는 모델 사용 (한도 에러 원천 차단)
-    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+    # 한국어 처리에 최적화된 다국어 모델로 업그레이드
+    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
     vector_db = FAISS.from_documents(docs, embeddings)
     return vector_db
 

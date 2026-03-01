@@ -85,8 +85,8 @@ def get_gemini_response(user_prompt):
     if st.session_state.vector_db is None:
         return "⚠️ 데이터베이스가 초기화되지 않았습니다. 관리자에게 문의하세요."
         
-    # [핵심] 상위 5개만 추출하여 토큰(TPM) 사용량 극소화
-    retrieved_docs = st.session_state.vector_db.similarity_search(user_prompt, k=5)
+    # [핵심] 상위 8개 추출하여 답변 품질과 토큰 사용량 균형 조정
+    retrieved_docs = st.session_state.vector_db.similarity_search(user_prompt, k=8)
     
     retrieved_context = "## [RETRIEVED DATA]\n"
     for d in retrieved_docs:

@@ -35,7 +35,7 @@ SYSTEM_PROMPT = """
 ## QC 분석기기 문서 위치 안내 봇 지침 (가중치 시스템 적용)
 
 당신은 QC 분석기기(HPLC/UPLC)의 트러블슈팅 및 유지보수 지침을 안내하는 전문 전문가입니다.
-제시된 [RETRIEVED DATA]는 사용자의 질문과 의미상 가장 유사한 상위 15개의 문서입니다.
+제시된 [RETRIEVED DATA]는 사용자의 질문과 의미상 가장 유사한 상위 8개의 문서입니다.
 이 데이터의 'Weight(절대 가중치)'와 'InternalRank(문서 내 순위)'를 최우선으로 고려하여 가장 적합한 해결책을 추천하세요.
 
 1. 카테고리 매칭 규칙
@@ -56,7 +56,7 @@ SYSTEM_PROMPT = """
   "type": "Troubleshooting/Maintenance",
   "recommendations": [
     {"no": "문서번호", "fix": "해결방법", "instrument": "장비명", "reasoning": "설명/근거", "weight": 점수},
-    ... 관련 있는 문서들(최대 10개)을 가중치 순으로 나열 ...
+    ... 관련 있는 문서들(최대 8개)을 가중치 순으로 나열 ...
   ]
 }
 """
@@ -64,11 +64,11 @@ SYSTEM_PROMPT = """
 def get_gemini_response(user_prompt):
     lang = "KR" if any(0xAC00 <= ord(c) <= 0xD7A3 for c in user_prompt) else "EN"
     
-    # [핵심] 엑셀 전체가 아닌, Vector DB에서 질문과 관련성 높은 TOP 15개만 추출 (Token 절약)
+    # [핵심] 엑셀 전체가 아닌, Vector DB에서 질문과 관련성 높은 TOP 8개만 추출 (Token 절약)
     if st.session_state.vector_db is None:
         return "⚠️ 데이터베이스가 초기화되지 않았습니다. 관리자에게 문의하세요."
         
-    retrieved_docs = st.session_state.vector_db.similarity_search(user_prompt, k=15)
+    retrieved_docs = st.session_state.vector_db.similarity_search(user_prompt, k=8)
     
     retrieved_context = "## [RETRIEVED DATA]\n"
     for d in retrieved_docs:
@@ -83,26 +83,37 @@ def get_gemini_response(user_prompt):
     {user_prompt}
     """
     
-    try:
-        model = genai.GenerativeModel("gemini-2.0-flash")
-        response = model.generate_content(full_prompt, generation_config={"response_mime_type": "application/json"})
-        import json
-        data = json.loads(response.text)
-        
-        # 세션 상태에 모든 추천 결과 저장
-        st.session_state.current_recommendations = data.get('recommendations', [])
-        st.session_state.current_page = 0
-        st.session_state.current_classification = data.get('classification', '')
-        st.session_state.current_reason = data.get('reason', '')
-        st.session_state.current_type = data.get('type', '')
-        
-        return format_recommendations(lang)
-    except Exception as e:
-        error_msg = str(e)
-        if "ResourceExhausted" in error_msg or "429" in error_msg:
-            return "⚠️ **일시적인 서버 요청 초과입니다.**\n\n현재 답변 요청이 너무 많아 구글 서버의 분당 무료 한도를 초과했습니다. 약 1분 정도 기다리신 후에 다시 질문해 주세요!"
-        else:
-            return f"⚠️ **에러가 발생했습니다.** {error_msg}"
+    models_to_try = [
+        "gemini-2.0-flash", 
+        "gemini-1.5-flash", 
+        "gemini-1.5-flash-8b"
+    ]
+    
+    last_error = ""
+
+    for model_name in models_to_try:
+        try:
+            model = genai.GenerativeModel(model_name)
+            response = model.generate_content(full_prompt, generation_config={"response_mime_type": "application/json"})
+            import json
+            data = json.loads(response.text)
+            
+            # 세션 상태에 모든 추천 결과 저장
+            st.session_state.current_recommendations = data.get('recommendations', [])
+            st.session_state.current_page = 0
+            st.session_state.current_classification = data.get('classification', '')
+            st.session_state.current_reason = data.get('reason', '')
+            st.session_state.current_type = data.get('type', '')
+            
+            return format_recommendations(lang)
+        except Exception as e:
+            last_error = str(e)
+            if "ResourceExhausted" in last_error or "429" in last_error or "quota" in last_error.lower():
+                continue # 다음 모델로 재시도 (Fallback)
+            else:
+                return f"⚠️ **에러가 발생했습니다 ({model_name}).** {last_error}"
+                
+    return "⚠️ **일시적인 서버 요청 초과입니다.**\n\n모든 AI 모델의 분당 무료 한도를 초과했습니다. 약 1분 정도 기다리신 후에 다시 질문해 주세요!"
 
 def format_recommendations(lang):
     recs = st.session_state.current_recommendations

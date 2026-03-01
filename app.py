@@ -3,16 +3,34 @@ import google.generativeai as genai
 import os
 import csv
 import re
+import random
+import json
 from dotenv import load_dotenv
 from utils import get_vector_db
 
 # 0. 초기 설정
 load_dotenv()
-api_key = os.getenv("GOOGLE_API_KEY")
-if not api_key:
-    st.error("Google API Key not found.")
+
+def get_all_api_keys():
+    keys = []
+    # Streamlit Secrets (Cloud)
+    try:
+        for k in st.secrets:
+            if "GOOGLE_API_KEY" in k:
+                val = st.secrets[k]
+                if val: keys.append(val)
+    except: pass
+    # Environment Variables (Local)
+    for env_key in os.environ:
+        if "GOOGLE_API_KEY" in env_key:
+            val = os.getenv(env_key)
+            if val and val not in keys: keys.append(val)
+    return list(set(keys)) # 중복 제거
+
+API_KEYS = get_all_api_keys()
+if not API_KEYS:
+    st.error("Google API Key를 찾을 수 없습니다. .env 파일에 GOOGLE_API_KEY_1, _2 등을 등록해주세요.")
     st.stop()
-genai.configure(api_key=api_key)
 
 # 1. 문서 링크 로드
 def load_document_links():
@@ -35,7 +53,7 @@ SYSTEM_PROMPT = """
 ## QC 분석기기 문서 위치 안내 봇 지침 (가중치 시스템 적용)
 
 당신은 QC 분석기기(HPLC/UPLC)의 트러블슈팅 및 유지보수 지침을 안내하는 전문 전문가입니다.
-제시된 [RETRIEVED DATA]는 사용자의 질문과 의미상 가장 유사한 상위 8개의 문서입니다.
+제시된 [RETRIEVED DATA]는 사용자의 질문과 의미상 가장 유사한 상위 5개의 문서입니다.
 이 데이터의 'Weight(절대 가중치)'와 'InternalRank(문서 내 순위)'를 최우선으로 고려하여 가장 적합한 해결책을 추천하세요.
 
 1. 카테고리 매칭 규칙
@@ -56,7 +74,7 @@ SYSTEM_PROMPT = """
   "type": "Troubleshooting/Maintenance",
   "recommendations": [
     {"no": "문서번호", "fix": "해결방법", "instrument": "장비명", "reasoning": "설명/근거", "weight": 점수},
-    ... 관련 있는 문서들(최대 8개)을 가중치 순으로 나열 ...
+    ... 관련 있는 문서들(최대 5개)을 가중치 순으로 나열 ...
   ]
 }
 """
@@ -64,56 +82,67 @@ SYSTEM_PROMPT = """
 def get_gemini_response(user_prompt):
     lang = "KR" if any(0xAC00 <= ord(c) <= 0xD7A3 for c in user_prompt) else "EN"
     
-    # [핵심] 엑셀 전체가 아닌, Vector DB에서 질문과 관련성 높은 TOP 8개만 추출 (Token 절약)
     if st.session_state.vector_db is None:
         return "⚠️ 데이터베이스가 초기화되지 않았습니다. 관리자에게 문의하세요."
         
-    retrieved_docs = st.session_state.vector_db.similarity_search(user_prompt, k=8)
+    # [핵심] 상위 5개만 추출하여 토큰(TPM) 사용량 극소화
+    retrieved_docs = st.session_state.vector_db.similarity_search(user_prompt, k=5)
     
     retrieved_context = "## [RETRIEVED DATA]\n"
     for d in retrieved_docs:
         m = d.metadata
         retrieved_context += f"- DocNo: {m.get('doc_no')} | Fix: {m.get('fix')} | Symptom: {m.get('symptom')} | InternalRank: {m.get('rank')} | Weight: {m.get('weight')} | Reasoning: {m.get('reasoning')}\n"
     
-    full_prompt = f"""
-    {SYSTEM_PROMPT}
-    {retrieved_context}
+    full_prompt = f"{SYSTEM_PROMPT}\n{retrieved_context}\n\n[USER QUESTION]\n{user_prompt}"
     
-    [USER QUESTION]
-    {user_prompt}
-    """
-    
+    # 모델 후보군 (2.5 Flash Lite부터 구형까지)
     models_to_try = [
+        "gemini-2.5-flash-lite", 
+        "gemini-2.0-flash-lite",
         "gemini-2.0-flash", 
         "gemini-1.5-flash", 
         "gemini-1.5-flash-8b"
     ]
     
+    # API 키 리스트를 무작위로 섞어서 부하 분산
+    current_keys = API_KEYS.copy()
+    random.shuffle(current_keys)
+    
     last_error = ""
-
-    for model_name in models_to_try:
-        try:
-            model = genai.GenerativeModel(model_name)
-            response = model.generate_content(full_prompt, generation_config={"response_mime_type": "application/json"})
-            import json
-            data = json.loads(response.text)
-            
-            # 세션 상태에 모든 추천 결과 저장
-            st.session_state.current_recommendations = data.get('recommendations', [])
-            st.session_state.current_page = 0
-            st.session_state.current_classification = data.get('classification', '')
-            st.session_state.current_reason = data.get('reason', '')
-            st.session_state.current_type = data.get('type', '')
-            
-            return format_recommendations(lang)
-        except Exception as e:
-            last_error = str(e)
-            if "ResourceExhausted" in last_error or "429" in last_error or "quota" in last_error.lower():
-                continue # 다음 모델로 재시도 (Fallback)
-            else:
-                return f"⚠️ **에러가 발생했습니다 ({model_name}).** {last_error}"
+    
+    # 키 로테이션 + 모델 폴백 (이중 루프 방어막)
+    for api_key in current_keys:
+        genai.configure(api_key=api_key)
+        
+        for model_name in models_to_try:
+            try:
+                model = genai.GenerativeModel(model_name)
+                response = model.generate_content(full_prompt, generation_config={"response_mime_type": "application/json"})
                 
-    return "⚠️ **일시적인 서버 요청 초과입니다.**\n\n모든 AI 모델의 분당 무료 한도를 초과했습니다. 약 1분 정도 기다리신 후에 다시 질문해 주세요!"
+                resp_json = response.text
+                # JSON 태그 제거 (Markdown 방지)
+                if resp_json.startswith("```json"):
+                    resp_json = resp_json.replace("```json", "").replace("```", "").strip()
+                
+                data = json.loads(resp_json)
+                
+                st.session_state.current_recommendations = data.get('recommendations', [])
+                st.session_state.current_page = 0
+                st.session_state.current_classification = data.get('classification', '')
+                st.session_state.current_reason = data.get('reason', '')
+                st.session_state.current_type = data.get('type', '')
+                
+                return format_recommendations(lang)
+                
+            except Exception as e:
+                last_error = str(e)
+                # 할당량 초과 에러인 경우에만 다음 조합 시도
+                if any(x in last_error for x in ["ResourceExhausted", "429", "quota", "Quota"]):
+                    continue 
+                else:
+                    return f"⚠️ **기술적 에러 발생 ({model_name}):** {last_error}"
+                    
+    return "⚠️ **모든 방어막(API 키 및 모델)이 한도를 초과했습니다.**\n\n현재 동시 사용자가 너무 많습니다. 약 1분만 기다려 주시면 한도가 초기화됩니다."
 
 def format_recommendations(lang):
     recs = st.session_state.current_recommendations

@@ -56,19 +56,18 @@ SYSTEM_PROMPT = """
 제시된 [RETRIEVED DATA]는 사용자의 질문과 의미상 가장 유사한 문서들입니다.
 
 [중요 규칙]
-1. 장비 매칭: 사용자의 질문에 특정 장비(UPLC 또는 HPLC)가 언급되었다면, 반드시 해당 장비의 문서를 최우선적으로 추천하십시오. 질문에 언급되지 않은 장비의 문서는 해당 장비의 해결책이 없을 경우에만 보조적으로 제시하십시오.
-2. 카테고리 분류: 질문을 분석하여 '트러블슈팅' 또는 '유지보수' 중 하나로 분류하세요.
+1. 장비 매칭: 사용자의 질문에 특정 장비(UPLC 또는 HPLC)가 언급되었다면, 반드시 해당 장비의 문서를 최우선적으로 추천하십시오.
+2. 상세 분류: 질문을 분석하여 '트러블슈팅' 같은 넓은 범위가 아니라, '**RT 지연 현상**', '**피크 모양 이상**', '**압력 상승**' 등 구체적인 원인이나 현상 위주로 분류명을 생성하십시오.
 3. 추천 로직: 'Weight(절대 가중치)'가 높은 순서대로 답변을 구성하되, 장비 호환성을 최우선으로 합니다.
 4. 말투: 전문가답고 정중하게 답변하십시오.
 
 [출력 형식 (JSON)]
 반드시 다음 구조의 JSON 형식으로만 답변하세요:
 {
-  "classification": "카테고리명",
-  "reason": "분류 근거 설명 (예: 사용자가 UPLC 피크 모양 이상에 대해 문의하였으므로 '트러블슈팅'으로 분류합니다.)",
-  "type": "Troubleshooting/Maintenance",
+  "classification": "상세 현상/원인 분류명 (예: RT 지연 현상)",
+  "reason": "분류 근거 설명 (짧고 명확하게)",
   "recommendations": [
-    {"no": "문서번호", "fix": "해결방법 요약", "instrument": "장비명", "reasoning": "선정 이유 및 구체적 설명", "weight": 점수},
+    {"no": "문서번호", "fix": "해결방법 요약", "instrument": "장비명", "reasoning": "설명/근거", "weight": 점수},
     ... 관련 있는 문서들(최대 5개) ...
   ]
 }
@@ -80,7 +79,6 @@ def get_gemini_response(user_prompt):
     if st.session_state.vector_db is None:
         return "⚠️ 데이터베이스가 초기화되지 않았습니다. 관리자에게 문의하세요."
         
-    # 장비 필터링 로직 추가
     prompt_lower = user_prompt.lower()
     instrument_filter = None
     if "uplc" in prompt_lower:
@@ -88,13 +86,10 @@ def get_gemini_response(user_prompt):
     elif "hplc" in prompt_lower:
         instrument_filter = "HPLC"
         
-    # 상위 10개 추출 (필터링 후에도 충분한 결과를 얻기 위해 k 상향)
     raw_docs = st.session_state.vector_db.similarity_search(user_prompt, k=15)
     
-    # 장비 필터링 적용
     if instrument_filter:
         retrieved_docs = [d for d in raw_docs if d.metadata.get('instrument') == instrument_filter]
-        # 필터링 후 결과가 너무 적으면 필터링 전 결과 일부 추가
         if len(retrieved_docs) < 5:
             others = [d for d in raw_docs if d.metadata.get('instrument') != instrument_filter]
             retrieved_docs.extend(others[:5-len(retrieved_docs)])
@@ -139,7 +134,6 @@ def get_gemini_response(user_prompt):
                 st.session_state.current_page = 0
                 st.session_state.current_classification = data.get('classification', '')
                 st.session_state.current_reason = data.get('reason', '')
-                st.session_state.current_type = data.get('type', '')
                 
                 return format_recommendations(lang)
                 
@@ -162,29 +156,25 @@ def format_recommendations(lang):
         return "더 이상 추천할 문서가 없습니다."
 
     if lang == "KR":
-        output = f"[분류 근거]\n{st.session_state.current_reason}\n\n"
-        output += f"분류 Doc Type: {st.session_state.current_type} Category: {st.session_state.current_classification}\n\n"
-        output += "해당 문제는 **" + st.session_state.current_classification + "**으로 분류가 되었습니다.\n이러한 유형에 따라 다음과 같은 문서들을 추천합니다.\n\n"
+        output = f"🐻\n[분류 근거] {st.session_state.current_reason}\n\n"
+        output += f"사용자의 질문에 따라 분석결과 **{st.session_state.current_classification}**으로 분류되었습니다.\n이러한 유형에 따라 다음과 같은 문서들을 추천합니다.\n\n"
     else:
-        output = f"[Classification Logic]\n{st.session_state.current_reason}\n\n"
-        output += f"Doc Type: {st.session_state.current_type} Category: {st.session_state.current_classification}\n\n"
-        output += "This issue has been classified as **" + st.session_state.current_classification + "**.\nWe recommend the following documents based on this type:\n\n"
+        output = f"🐻\n[Logic] {st.session_state.current_reason}\n\n"
+        output += f"Based on your question, it has been classified as **{st.session_state.current_classification}**.\nWe recommend the following documents:\n\n"
     
     for i, r in enumerate(current_recs):
         rank = start_idx + i + 1
-        output += f"**{rank}순위: {r['no']} / {r['fix']} / {r['instrument']}**\n\n"
-        output += f"설명: {r['reasoning']} (가중치: {r['weight']}점)\n"
+        output += f"**{rank}순위: {r['no']} / {r['fix']} / {r['instrument']}**\n"
+        output += f"설명: {r['reasoning']} (가중치: {r['weight']}점)\n\n" # 줄바꿈 추가
         
-        # 링크 매칭 로직 개선
         instr = str(r.get('instrument', '')).upper()
         doc_no = str(r.get('no', ''))
         
         match = re.search(r'\d+', doc_no)
         if match:
             num = match.group().lstrip('0')
-            if not num: num = "0" # "000" 같은 경우 대비
+            if not num: num = "0"
             
-            # 장비명 정규화 (HPLC/UPLC -> HPLC)
             target_instr = "HPLC" if "HPLC" in instr else "UPLC"
             key = (target_instr, num, lang)
             
@@ -192,11 +182,13 @@ def format_recommendations(lang):
                 url = DOCUMENT_LINKS[key]
                 label = "📄 문서 바로가기" if lang == "KR" else "📄 View Document"
                 output += f"🔗 [{label}]({url})\n\n"
+        
+        # 순위 간 구분선 (선택 사항)
+        if i < len(current_recs) - 1:
+            output += "---\n\n"
     
     # Footer 처리
-    if len(recs) > end_idx:
-        pass # 버튼은 UI 영역에서 생성
-    else:
+    if len(recs) <= end_idx:
         global_link = "https://works.do/FV0WJOQ"
         if lang == "KR":
             output += f"\n---\n💡 찾으시는 문서가 없나요? [**전체 문서함(폴더)**]({global_link})"
